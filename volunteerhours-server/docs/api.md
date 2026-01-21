@@ -11,7 +11,7 @@
 ```json
 {
   "code": "auth_error",
-  "message": "auth error: invalid session"
+  "message": "认证失败：会话无效"
 }
 ```
 
@@ -37,6 +37,7 @@
 - 仅用于本地调试，会自动使用默认配置并生成自签名证书。
 - 默认数据库为 `sqlite://data/dev.db?mode=rwc`，默认 RP 信息为 `localhost`/`http://localhost:8443`。
 - 若启用 `ALLOW_HTTP=true`，服务以 HTTP 启动，HTTPS 交由反向代理处理。
+- 开发者模式会忽略环境变量配置，强制使用默认值。
 
 ## 认证接口
 

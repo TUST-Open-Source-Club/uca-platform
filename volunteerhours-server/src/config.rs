@@ -52,30 +52,36 @@ impl Config {
         let developer_mode = env_bool("DEVELOPER_MODE").unwrap_or(false);
         let allow_http = env_bool("ALLOW_HTTP").unwrap_or(developer_mode);
 
-        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8443".to_string());
-        let database_url = match env::var("DATABASE_URL") {
-            Ok(value) => value,
-            Err(_) if developer_mode => "sqlite://data/dev.db?mode=rwc".to_string(),
-            Err(_) => return Err(AppError::config("DATABASE_URL is required")),
+        let bind_addr = if developer_mode {
+            "0.0.0.0:8443".to_string()
+        } else {
+            env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8443".to_string())
         };
-        let rp_id = match env::var("RP_ID") {
-            Ok(value) => value,
-            Err(_) if developer_mode => "localhost".to_string(),
-            Err(_) => return Err(AppError::config("RP_ID is required")),
+        let database_url = if developer_mode {
+            "sqlite://data/dev.db?mode=rwc".to_string()
+        } else {
+            env::var("DATABASE_URL")
+                .map_err(|_| AppError::config("DATABASE_URL is required"))?
+        };
+        let rp_id = if developer_mode {
+            "localhost".to_string()
+        } else {
+            env::var("RP_ID").map_err(|_| AppError::config("RP_ID is required"))?
         };
         let default_origin = if allow_http {
             "http://localhost:8443"
         } else {
             "https://localhost:8443"
         };
-        let rp_origin = match env::var("RP_ORIGIN") {
-            Ok(value) => value
+        let rp_origin = if developer_mode {
+            default_origin
                 .parse::<Url>()
-                .map_err(|_| AppError::config("RP_ORIGIN must be a valid URL"))?,
-            Err(_) if developer_mode => default_origin
+                .map_err(|_| AppError::config("RP_ORIGIN must be a valid URL"))?
+        } else {
+            env::var("RP_ORIGIN")
+                .map_err(|_| AppError::config("RP_ORIGIN is required"))?
                 .parse::<Url>()
-                .map_err(|_| AppError::config("RP_ORIGIN must be a valid URL"))?,
-            Err(_) => return Err(AppError::config("RP_ORIGIN is required")),
+                .map_err(|_| AppError::config("RP_ORIGIN must be a valid URL"))?
         };
         let tls_cert_path = env::var("TLS_CERT_PATH")
             .unwrap_or_else(|_| "data/tls/cert.pem".to_string())
@@ -85,10 +91,11 @@ impl Config {
             .into();
         let tls_import_cert_path = env::var("TLS_IMPORT_CERT_PEM").ok().map(PathBuf::from);
         let tls_import_key_path = env::var("TLS_IMPORT_KEY_PEM").ok().map(PathBuf::from);
-        let tls_key_enc_key = match env::var("TLS_KEY_ENC_KEY") {
-            Ok(value) => value,
-            Err(_) if developer_mode => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_string(),
-            Err(_) => return Err(AppError::config("TLS_KEY_ENC_KEY is required")),
+        let tls_key_enc_key = if developer_mode {
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_string()
+        } else {
+            env::var("TLS_KEY_ENC_KEY")
+                .map_err(|_| AppError::config("TLS_KEY_ENC_KEY is required"))?
         };
         let tls_key_enc_key = base64::engine::general_purpose::STANDARD
             .decode(tls_key_enc_key)
@@ -107,10 +114,11 @@ impl Config {
             .unwrap_or_else(|_| "3600".to_string())
             .parse::<i64>()
             .map_err(|_| AppError::config("SESSION_TTL_SECONDS must be integer"))?;
-        let auth_secret_key = match env::var("AUTH_SECRET_KEY") {
-            Ok(value) => value,
-            Err(_) if developer_mode => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_string(),
-            Err(_) => return Err(AppError::config("AUTH_SECRET_KEY is required")),
+        let auth_secret_key = if developer_mode {
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_string()
+        } else {
+            env::var("AUTH_SECRET_KEY")
+                .map_err(|_| AppError::config("AUTH_SECRET_KEY is required"))?
         };
         let auth_secret_key = base64::engine::general_purpose::STANDARD
             .decode(auth_secret_key)
@@ -120,7 +128,11 @@ impl Config {
                 "AUTH_SECRET_KEY must be 32 bytes after base64 decode",
             ));
         }
-        let bootstrap_token = env::var("BOOTSTRAP_TOKEN").ok();
+        let bootstrap_token = if developer_mode {
+            None
+        } else {
+            env::var("BOOTSTRAP_TOKEN").ok()
+        };
 
         Ok(Self {
             bind_addr,

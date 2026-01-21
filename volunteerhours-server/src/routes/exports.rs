@@ -62,49 +62,29 @@ pub async fn export_summary_excel(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
+    let fields = load_export_fields(&state, "summary").await?;
+    let export_fields = if fields.is_empty() {
+        default_summary_fields()
+    } else {
+        fields
+    };
+
     let mut workbook = rust_xlsxwriter::Workbook::new();
     let worksheet = workbook.add_worksheet();
-    worksheet
-        .write_string(0, 0, "学号")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 1, "姓名")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 2, "班级")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 3, "个人自评学时")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 4, "审核通过学时")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 5, "备注")
-        .map_err(|_| AppError::internal("write excel failed"))?;
+    for (idx, field) in export_fields.iter().enumerate() {
+        worksheet
+            .write_string(0, idx as u16, &field.label)
+            .map_err(|_| AppError::internal("write excel failed"))?;
+    }
 
     for (idx, student) in students.iter().enumerate() {
         let (self_hours, approved_hours, reason) =
             compute_student_hours(&state, student.id).await?;
         let row = (idx + 1) as u32;
-        worksheet
-            .write_string(row, 0, &student.student_no)
-            .map_err(|_| AppError::internal("write excel failed"))?;
-        worksheet
-            .write_string(row, 1, &student.name)
-            .map_err(|_| AppError::internal("write excel failed"))?;
-        worksheet
-            .write_string(row, 2, &student.class_name)
-            .map_err(|_| AppError::internal("write excel failed"))?;
-        worksheet
-            .write_number(row, 3, self_hours as f64)
-            .map_err(|_| AppError::internal("write excel failed"))?;
-        worksheet
-            .write_number(row, 4, approved_hours as f64)
-            .map_err(|_| AppError::internal("write excel failed"))?;
-        worksheet
-            .write_string(row, 5, &reason)
-            .map_err(|_| AppError::internal("write excel failed"))?;
+        for (col, field) in export_fields.iter().enumerate() {
+            let value = resolve_export_value(field.field_key.as_str(), student, self_hours, approved_hours, &reason);
+            write_cell(worksheet, row, col as u16, &value)?;
+        }
     }
 
     let buffer = workbook
@@ -139,39 +119,25 @@ pub async fn export_student_excel(
     let (self_hours, approved_hours, reason) =
         compute_student_hours(&state, student.id).await?;
 
+    let fields = load_export_fields(&state, "student_export").await?;
+    let export_fields = if fields.is_empty() {
+        default_student_fields()
+    } else {
+        fields
+    };
+
     let mut workbook = rust_xlsxwriter::Workbook::new();
     let worksheet = workbook.add_worksheet();
-    worksheet
-        .write_string(0, 0, "学号")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 1, "姓名")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 2, "个人自评学时")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 3, "审核通过学时")
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(0, 4, "备注")
-        .map_err(|_| AppError::internal("write excel failed"))?;
+    for (idx, field) in export_fields.iter().enumerate() {
+        worksheet
+            .write_string(0, idx as u16, &field.label)
+            .map_err(|_| AppError::internal("write excel failed"))?;
+    }
 
-    worksheet
-        .write_string(1, 0, &student.student_no)
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(1, 1, &student.name)
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_number(1, 2, self_hours as f64)
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_number(1, 3, approved_hours as f64)
-        .map_err(|_| AppError::internal("write excel failed"))?;
-    worksheet
-        .write_string(1, 4, &reason)
-        .map_err(|_| AppError::internal("write excel failed"))?;
+    for (col, field) in export_fields.iter().enumerate() {
+        let value = resolve_export_value(field.field_key.as_str(), &student, self_hours, approved_hours, &reason);
+        write_cell(worksheet, 1, col as u16, &value)?;
+    }
 
     let buffer = workbook
         .save_to_buffer()
@@ -471,6 +437,96 @@ fn load_signature_image(path: &str) -> Option<Image> {
     }
     let image = image::io::Reader::open(path).ok()?.decode().ok()?;
     Some(Image::from_dynamic_image(&image))
+}
+
+#[derive(Clone)]
+struct ExportField {
+    field_key: String,
+    label: String,
+    order_index: i32,
+}
+
+async fn load_export_fields(state: &AppState, form_type: &str) -> Result<Vec<ExportField>, AppError> {
+    let mut fields = FormField::find()
+        .filter(form_fields::Column::FormType.eq(form_type))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .into_iter()
+        .map(|field| ExportField {
+            field_key: field.field_key,
+            label: field.label,
+            order_index: field.order_index,
+        })
+        .collect::<Vec<_>>();
+    fields.sort_by_key(|item| item.order_index);
+    Ok(fields)
+}
+
+fn default_summary_fields() -> Vec<ExportField> {
+    vec![
+        ExportField { field_key: "student_no".to_string(), label: "学号".to_string(), order_index: 1 },
+        ExportField { field_key: "name".to_string(), label: "姓名".to_string(), order_index: 2 },
+        ExportField { field_key: "class_name".to_string(), label: "班级".to_string(), order_index: 3 },
+        ExportField { field_key: "self_hours".to_string(), label: "个人自评学时".to_string(), order_index: 4 },
+        ExportField { field_key: "approved_hours".to_string(), label: "审核通过学时".to_string(), order_index: 5 },
+        ExportField { field_key: "reason".to_string(), label: "备注".to_string(), order_index: 6 },
+    ]
+}
+
+fn default_student_fields() -> Vec<ExportField> {
+    vec![
+        ExportField { field_key: "student_no".to_string(), label: "学号".to_string(), order_index: 1 },
+        ExportField { field_key: "name".to_string(), label: "姓名".to_string(), order_index: 2 },
+        ExportField { field_key: "self_hours".to_string(), label: "个人自评学时".to_string(), order_index: 3 },
+        ExportField { field_key: "approved_hours".to_string(), label: "审核通过学时".to_string(), order_index: 4 },
+        ExportField { field_key: "reason".to_string(), label: "备注".to_string(), order_index: 5 },
+    ]
+}
+
+fn resolve_export_value(
+    field_key: &str,
+    student: &students::Model,
+    self_hours: i32,
+    approved_hours: i32,
+    reason: &str,
+) -> ExportValue {
+    match field_key {
+        "student_no" => ExportValue::Text(student.student_no.clone()),
+        "name" => ExportValue::Text(student.name.clone()),
+        "gender" => ExportValue::Text(student.gender.clone()),
+        "department" => ExportValue::Text(student.department.clone()),
+        "major" => ExportValue::Text(student.major.clone()),
+        "class_name" => ExportValue::Text(student.class_name.clone()),
+        "phone" => ExportValue::Text(student.phone.clone()),
+        "self_hours" => ExportValue::Number(self_hours as f64),
+        "approved_hours" => ExportValue::Number(approved_hours as f64),
+        "reason" => ExportValue::Text(reason.to_string()),
+        _ => ExportValue::Text(String::new()),
+    }
+}
+
+enum ExportValue {
+    Text(String),
+    Number(f64),
+}
+
+fn write_cell(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    row: u32,
+    col: u16,
+    value: &ExportValue,
+) -> Result<(), AppError> {
+    match value {
+        ExportValue::Text(text) => worksheet
+            .write_string(row, col, text)
+            .map(|_| ())
+            .map_err(|_| AppError::internal("write excel failed")),
+        ExportValue::Number(number) => worksheet
+            .write_number(row, col, *number)
+            .map(|_| ())
+            .map_err(|_| AppError::internal("write excel failed")),
+    }
 }
 
 struct CustomFieldEntry {

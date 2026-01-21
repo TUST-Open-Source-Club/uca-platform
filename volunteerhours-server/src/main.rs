@@ -28,11 +28,9 @@ async fn main() -> Result<(), AppError> {
 
     let config = Arc::new(Config::from_env()?);
 
-    tls::ensure_tls_material(&config)?;
-    let (cert_pem, key_pem) = tls::load_tls_pem(&config)?;
-    let tls_config = RustlsConfig::from_pem(cert_pem, key_pem)
-        .await
-        .map_err(|err| AppError::internal(&format!("failed to configure TLS: {err}")))?;
+    if config.developer_mode {
+        tls::ensure_tls_material(&config)?;
+    }
 
     let db = db::connect(&config.database_url).await?;
     Migrator::up(&db, None)
@@ -70,10 +68,23 @@ async fn main() -> Result<(), AppError> {
         .parse()
         .map_err(|_| AppError::config("BIND_ADDR invalid"))?;
 
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service())
-        .await
-        .map_err(|err| AppError::internal(&format!("server error: {err}")))?;
+    if config.allow_http {
+        axum_server::bind(addr)
+            .serve(app.into_make_service())
+            .await
+            .map_err(|err| AppError::internal(&format!("server error: {err}")))?;
+    } else {
+        tls::ensure_tls_material(&config)?;
+        let (cert_pem, key_pem) = tls::load_tls_pem(&config)?;
+        let tls_config = RustlsConfig::from_pem(cert_pem, key_pem)
+            .await
+            .map_err(|err| AppError::internal(&format!("failed to configure TLS: {err}")))?;
+
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(app.into_make_service())
+            .await
+            .map_err(|err| AppError::internal(&format!("server error: {err}")))?;
+    }
 
     Ok(())
 }

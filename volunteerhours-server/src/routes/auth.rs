@@ -715,7 +715,7 @@ async fn create_session_cookie(
 
     let cookie = Cookie::build((state.config.session_cookie_name.clone(), token))
         .http_only(true)
-        .secure(true)
+        .secure(!state.config.allow_http)
         .same_site(SameSite::Strict)
         .path("/")
         .expires(expires_cookie)

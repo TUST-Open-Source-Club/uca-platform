@@ -1,13 +1,13 @@
-# VolunteerHours API
+# VolunteerHours 接口文档
 
-This document describes the current authentication APIs implemented in the server.
+本文档描述服务端已实现的接口与使用方式。
 
-## Base
-- Base URL: `https://<host>:<port>`
-- All responses are JSON unless noted otherwise.
-- Cookies are HTTP-only, `SameSite=Strict`, and `Secure`.
+## 基础信息
+- 基础地址：`https://<host>:<port>`（开发者模式或允许 HTTP 时可为 `http://<host>:<port>`）。
+- 所有响应默认均为 JSON，除非特别说明。
+- Cookie 为 HTTP-only，`SameSite=Strict`，默认 `Secure`；当 `ALLOW_HTTP=true` 时不设置 `Secure`。
 
-## Error format
+## 错误格式
 ```json
 {
   "code": "auth_error",
@@ -15,58 +15,65 @@ This document describes the current authentication APIs implemented in the serve
 }
 ```
 
-## Environment configuration
-- `BIND_ADDR` (default `0.0.0.0:8443`)
-- `DATABASE_URL` (required, MySQL or PostgreSQL)
-- `RP_ID` (required, WebAuthn RPID, e.g. `example.com`)
-- `RP_ORIGIN` (required, e.g. `https://example.com`)
-- `TLS_CERT_PATH` (default `data/tls/cert.pem`)
-- `TLS_KEY_PATH` (default `data/tls/key.enc`)
-- `TLS_IMPORT_CERT_PEM` (optional PEM import)
-- `TLS_IMPORT_KEY_PEM` (optional PEM import)
-- `TLS_KEY_ENC_KEY` (required base64, 32 bytes after decode)
-- `AUTH_SECRET_KEY` (required base64, 32 bytes after decode)
-- `UPLOAD_DIR` (default `data/uploads`)
-- `SESSION_COOKIE_NAME` (default `vh_session`)
-- `SESSION_TTL_SECONDS` (default `3600`)
-- `BOOTSTRAP_TOKEN` (optional bootstrap secret)
+## 环境配置
+- `BIND_ADDR`（默认 `0.0.0.0:8443`）
+- `DATABASE_URL`（必填，支持 MySQL/PostgreSQL；开发者模式默认 SQLite）
+- `RP_ID`（必填，WebAuthn RPID，如 `example.com`）
+- `RP_ORIGIN`（必填，如 `https://example.com`）
+- `TLS_CERT_PATH`（默认 `data/tls/cert.pem`）
+- `TLS_KEY_PATH`（默认 `data/tls/key.enc`）
+- `TLS_IMPORT_CERT_PEM`（可选，导入 PEM 证书）
+- `TLS_IMPORT_KEY_PEM`（可选，导入 PEM 私钥）
+- `TLS_KEY_ENC_KEY`（必填，Base64 解码后 32 字节）
+- `AUTH_SECRET_KEY`（必填，Base64 解码后 32 字节）
+- `UPLOAD_DIR`（默认 `data/uploads`）
+- `SESSION_COOKIE_NAME`（默认 `vh_session`）
+- `SESSION_TTL_SECONDS`（默认 `3600`）
+- `BOOTSTRAP_TOKEN`（可选，引导创建管理员口令）
+- `DEVELOPER_MODE`（可选，`true` 启用开发者模式，全部配置使用默认值）
+- `ALLOW_HTTP`（可选，`true` 时允许 HTTP 直连；生产建议由反向代理终止 HTTPS）
 
-## Auth endpoints
+开发者模式说明：
+- 仅用于本地调试，会自动使用默认配置并生成自签名证书。
+- 默认数据库为 `sqlite://data/dev.db?mode=rwc`，默认 RP 信息为 `localhost`/`http://localhost:8443`。
+- 若启用 `ALLOW_HTTP=true`，服务以 HTTP 启动，HTTPS 交由反向代理处理。
+
+## 认证接口
 
 ### GET /health
-Simple health check.
+健康检查接口。
 
-Response:
+响应：
 ```json
 { "status": "ok" }
 ```
 
 ### POST /auth/bootstrap
-Create the initial admin user. Only allowed when no users exist. If `BOOTSTRAP_TOKEN` is set, it must be provided.
+创建初始管理员用户，仅在系统无用户时允许。若配置了 `BOOTSTRAP_TOKEN`，必须提供。
 
-Request:
+请求：
 ```json
 {
-  "token": "<optional bootstrap token>",
+  "token": "可选引导口令",
   "username": "admin",
-  "display_name": "Admin"
+  "display_name": "管理员"
 }
 ```
 
-Response:
+响应：
 ```json
 { "user_id": "<uuid>" }
 ```
 
 ### POST /auth/passkey/register/start
-Start passkey registration for an existing user.
+为已有用户发起 Passkey 注册。
 
-Request:
+请求：
 ```json
 { "username": "20231234" }
 ```
 
-Response:
+响应：
 ```json
 {
   "session_id": "<uuid>",
@@ -75,31 +82,31 @@ Response:
 ```
 
 ### POST /auth/passkey/register/finish
-Finish passkey registration.
+完成 Passkey 注册。
 
-Request:
+请求：
 ```json
 {
   "session_id": "<uuid>",
   "credential": { /* RegisterPublicKeyCredential */ },
-  "device_label": "My Laptop"
+  "device_label": "我的设备"
 }
 ```
 
-Response:
+响应：
 ```json
 { "passkey_id": "<uuid>" }
 ```
 
 ### POST /auth/passkey/login/start
-Start passkey authentication.
+发起 Passkey 登录。
 
-Request:
+请求：
 ```json
 { "username": "20231234" }
 ```
 
-Response:
+响应：
 ```json
 {
   "session_id": "<uuid>",
@@ -108,9 +115,9 @@ Response:
 ```
 
 ### POST /auth/passkey/login/finish
-Finish passkey authentication. On success, sets a session cookie.
+完成 Passkey 登录，成功后写入会话 Cookie。
 
-Request:
+请求：
 ```json
 {
   "session_id": "<uuid>",
@@ -118,15 +125,15 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 { "user_id": "<uuid>" }
 ```
 
 ### GET /auth/me
-Return current session user profile.
+获取当前会话用户信息。
 
-Response:
+响应：
 ```json
 {
   "id": "<uuid>",
@@ -137,14 +144,14 @@ Response:
 ```
 
 ### POST /auth/totp/enroll/start
-Start TOTP enrollment for the current user (requires session cookie).
+为当前用户发起 TOTP 绑定（需要会话 Cookie）。
 
-Request:
+请求：
 ```json
-{ "device_label": "Authenticator" }
+{ "device_label": "验证器" }
 ```
 
-Response:
+响应：
 ```json
 {
   "enrollment_id": "<uuid>",
@@ -153,9 +160,9 @@ Response:
 ```
 
 ### POST /auth/totp/enroll/finish
-Finish TOTP enrollment (requires session cookie).
+完成 TOTP 绑定（需要会话 Cookie）。
 
-Request:
+请求：
 ```json
 {
   "enrollment_id": "<uuid>",
@@ -163,15 +170,15 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 { "status": "ok" }
 ```
 
 ### POST /auth/totp/verify
-Verify TOTP and create a session.
+验证 TOTP 并创建会话。
 
-Request:
+请求：
 ```json
 {
   "username": "20231234",
@@ -179,39 +186,39 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 { "user_id": "<uuid>" }
 ```
 
 ### POST /auth/recovery/verify
-Verify a recovery code and create a session.
+验证恢复码并创建会话。
 
-Request:
+请求：
 ```json
 {
   "username": "20231234",
-  "code": "<recovery code>"
+  "code": "<恢复码>"
 }
 ```
 
-Response:
+响应：
 ```json
 { "user_id": "<uuid>" }
 ```
 
 ### POST /auth/recovery/regenerate
-Regenerate recovery codes for current user (requires session cookie). Old codes are invalidated.
+重新生成恢复码（需要会话 Cookie），旧恢复码将失效。
 
-Response:
+响应：
 ```json
-{ "codes": ["code1", "code2", "..."] }
+{ "codes": ["恢复码1", "恢复码2", "..."] }
 ```
 
 ### GET /auth/devices
-List registered devices for current user (requires session cookie).
+列出当前用户已绑定设备（需要会话 Cookie）。
 
-Response:
+响应：
 ```json
 [
   {
@@ -227,19 +234,19 @@ Response:
 ```
 
 ### DELETE /auth/devices/{device_id}
-Remove a device for the current user.
+移除当前用户设备。
 
-Response:
+响应：
 ```json
 { "status": "ok" }
 ```
 
-## Student endpoints
+## 学生接口
 
 ### POST /students
-Create a student (admin only, requires session cookie).
+创建学生（仅管理员，需会话 Cookie）。
 
-Request:
+请求：
 ```json
 {
   "student_no": "2023001",
@@ -252,7 +259,7 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 {
   "id": "<uuid>",
@@ -267,9 +274,9 @@ Response:
 ```
 
 ### POST /students/query
-List students with filters (admin/teacher/reviewer). Use JSON body for filters.
+按条件查询学生（管理员/教师/审核人员），过滤条件通过 JSON 请求体传入。
 
-Request:
+请求：
 ```json
 {
   "department": "信息学院",
@@ -279,7 +286,7 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 [{
   "id": "<uuid>",
@@ -294,14 +301,24 @@ Response:
 ```
 
 ### POST /students/import
-Import students from Excel (admin only). Multipart form field `file`.
+从 Excel 导入学生（仅管理员），multipart 字段 `file`。
 
-Request: `multipart/form-data`
-- `file`: `.xlsx` exported from Tencent Docs
+请求： `multipart/form-data`
+- `file`：腾讯文档导出的 `.xlsx` 文件
 
-Response:
+响应：
 ```json
 { "inserted": 120, "updated": 5 }
+```
+
+标准表头（学生导入）：
+```
+学号 | 姓名 | 性别 | 院系 | 专业 | 班级 | 手机号
+```
+示例（第一行表头，后续为数据行）：
+```
+学号,姓名,性别,院系,专业,班级,手机号
+2023001,张三,男,信息学院,软件工程,软工1班,13800000000
 ```
 
 ## 记录接口
@@ -309,7 +326,7 @@ Response:
 ### POST /records/volunteer
 提交志愿服务记录（学生）。
 
-Request:
+请求：
 ```json
 {
   "title": "社区服务",
@@ -321,7 +338,7 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 {
   "id": "<uuid>",
@@ -342,7 +359,7 @@ Response:
 ### POST /records/contest
 提交竞赛获奖记录（学生）。
 
-Request:
+请求：
 ```json
 {
   "contest_name": "全国大学生数学建模竞赛",
@@ -354,7 +371,7 @@ Request:
 }
 ```
 
-Response:
+响应：
 ```json
 {
   "id": "<uuid>",
@@ -376,7 +393,7 @@ Response:
 ### POST /records/volunteer/query
 查询志愿服务记录（学生/审核角色）。
 
-Request:
+请求：
 ```json
 { "status": "submitted" }
 ```
@@ -384,15 +401,15 @@ Request:
 ### POST /records/contest/query
 查询竞赛记录（学生/审核角色）。
 
-Request:
+请求：
 ```json
 { "status": "submitted" }
 ```
 
 ### POST /records/volunteer/{record_id}/review
-审核志愿服务记录（初审 reviewer/admin，复审 teacher/admin）。
+审核志愿服务记录（初审：审核人员/管理员；复审：教师/管理员）。
 
-Request:
+请求：
 ```json
 {
   "stage": "first",
@@ -403,9 +420,9 @@ Request:
 ```
 
 ### POST /records/contest/{record_id}/review
-审核竞赛记录（初审 reviewer/admin，复审 teacher/admin）。
+审核竞赛记录（初审：审核人员/管理员；复审：教师/管理员）。
 
-Request:
+请求：
 ```json
 {
   "stage": "final",
@@ -420,7 +437,7 @@ Request:
 ### POST /attachments/volunteer/{record_id}
 上传志愿服务附件（学生本人，multipart `file`）。
 
-Response:
+响应：
 ```json
 { "id": "<uuid>", "stored_name": "..." }
 ```
@@ -428,7 +445,7 @@ Response:
 ### POST /attachments/contest/{record_id}
 上传竞赛附件（学生本人，multipart `file`）。
 
-Response:
+响应：
 ```json
 { "id": "<uuid>", "stored_name": "..." }
 ```
@@ -436,7 +453,7 @@ Response:
 ### POST /signatures/{record_type}/{record_id}/{stage}
 上传审核签名（stage: first/final）。
 
-Response:
+响应：
 ```json
 { "id": "<uuid>", "signature_path": "..." }
 ```
@@ -446,13 +463,23 @@ Response:
 ### POST /export/summary/excel
 导出学院/专业/班级汇总表。
 
-Request:
+请求：
 ```json
 { "department": "信息学院", "major": "软件工程", "class_name": "软工1班" }
 ```
 
+汇总导出字段支持自定义（通过 `form_fields` 的 `form_type=summary` 配置），内置字段 key：
+```
+student_no | name | gender | department | major | class_name | phone | self_hours | approved_hours | reason
+```
+
 ### POST /export/student/{student_no}/excel
 导出个人学时专项表。
+
+个人导出字段支持自定义（通过 `form_fields` 的 `form_type=student_export` 配置），内置字段 key：
+```
+student_no | name | gender | department | major | class_name | phone | self_hours | approved_hours | reason
+```
 
 ### POST /export/record/{record_type}/{record_id}/pdf
 导出单条记录 PDF。
@@ -462,7 +489,7 @@ Request:
 ### GET /forms/{form_type}/fields
 获取指定表单类型字段（需登录）。
 
-Response:
+响应：
 ```json
 [
   {
@@ -480,13 +507,20 @@ Response:
 ### GET /competitions
 获取竞赛名称库（需登录）。
 
+响应：
+```json
+[
+  { "id": "<uuid>", "name": "全国大学生数学建模竞赛" }
+]
+```
+
 ### GET /admin/competitions
 获取竞赛名称库（管理员）。
 
 ### POST /admin/competitions
 新增竞赛名称（管理员）。
 
-Request:
+请求：
 ```json
 { "name": "全国大学生数学建模竞赛" }
 ```
@@ -494,9 +528,19 @@ Request:
 ### POST /admin/competitions/import
 从 Excel 导入竞赛名称（管理员，multipart 字段 `file`）。
 
-Response:
+响应：
 ```json
 { "inserted": 10, "skipped": 2 }
+```
+
+标准表头（竞赛库导入）：
+```
+竞赛名称
+```
+示例：
+```
+竞赛名称
+全国大学生数学建模竞赛
 ```
 
 ### GET /admin/form-fields
@@ -505,7 +549,7 @@ Response:
 ### POST /admin/form-fields
 新增表单字段（管理员）。
 
-Request:
+请求：
 ```json
 {
   "form_type": "volunteer",
@@ -517,18 +561,59 @@ Request:
 }
 ```
 
+表单类型（form_type）建议值：
+```
+volunteer | contest | summary | student_export
+```
+
 ### POST /admin/records/volunteer/import
 批量导入志愿服务记录（管理员，multipart 字段 `file`）。
 
-Response:
+响应：
 ```json
 { "inserted": 12, "skipped": 3 }
+```
+
+标准表头（志愿服务导入，必填）：
+```
+学号 | 标题 | 描述 | 自评学时
+```
+可选表头：
+```
+初审学时 | 复审学时 | 审核状态 | 不通过原因
+```
+自定义字段列：
+```
+列名可为字段 label 或 field_key（如 “地点” 或 “location”）
+```
+示例：
+```
+学号,标题,描述,自评学时,初审学时,审核状态,地点
+2023001,社区服务,社区清洁,4,3,已初审,校内操场
 ```
 
 ### POST /admin/records/contest/import
 批量导入竞赛获奖记录（管理员，multipart 字段 `file`）。
 
-Response:
+响应：
 ```json
 { "inserted": 10, "skipped": 1 }
+```
+
+标准表头（竞赛获奖导入，必填）：
+```
+学号 | 竞赛名称 | 获奖等级 | 自评学时
+```
+可选表头：
+```
+初审学时 | 复审学时 | 审核状态 | 不通过原因
+```
+自定义字段列：
+```
+列名可为字段 label 或 field_key（如 “主办方” 或 “sponsor”）
+```
+示例：
+```
+学号,竞赛名称,获奖等级,自评学时,复审学时,审核状态,主办方
+2023001,全国大学生数学建模竞赛,省赛一等奖,8,6,已复审,数学学院
 ```

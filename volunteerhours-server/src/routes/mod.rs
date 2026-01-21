@@ -1,0 +1,37 @@
+//! HTTP 路由处理器。
+
+use axum::{routing::{delete, get, post}, Router};
+
+use crate::state::AppState;
+
+pub mod auth;
+pub mod students;
+pub mod records;
+
+/// 构建应用路由。
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/health", get(auth::health))
+        .route("/auth/bootstrap", post(auth::bootstrap_admin))
+        .route("/auth/passkey/register/start", post(auth::passkey_register_start))
+        .route("/auth/passkey/register/finish", post(auth::passkey_register_finish))
+        .route("/auth/passkey/login/start", post(auth::passkey_login_start))
+        .route("/auth/passkey/login/finish", post(auth::passkey_login_finish))
+        .route("/auth/totp/enroll/start", post(auth::totp_enroll_start))
+        .route("/auth/totp/enroll/finish", post(auth::totp_enroll_finish))
+        .route("/auth/totp/verify", post(auth::totp_verify))
+        .route("/auth/recovery/verify", post(auth::recovery_verify))
+        .route("/auth/recovery/regenerate", post(auth::recovery_regenerate))
+        .route("/auth/devices", get(auth::list_devices))
+        .route("/auth/devices/:device_id", delete(auth::delete_device))
+        .route("/students", post(students::create_student))
+        .route("/students/query", post(students::list_students))
+        .route("/students/import", post(students::import_students))
+        .route("/records/volunteer", post(records::create_volunteer_record))
+        .route("/records/contest", post(records::create_contest_record))
+        .route("/records/volunteer/query", post(records::list_volunteer_records))
+        .route("/records/contest/query", post(records::list_contest_records))
+        .route("/records/volunteer/:record_id/review", post(records::review_volunteer_record))
+        .route("/records/contest/:record_id/review", post(records::review_contest_record))
+        .with_state(state)
+}

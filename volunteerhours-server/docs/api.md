@@ -314,7 +314,10 @@ Request:
 {
   "title": "社区服务",
   "description": "社区清洁",
-  "self_hours": 4
+  "self_hours": 4,
+  "custom_fields": {
+    "location": "校内操场"
+  }
 }
 ```
 
@@ -329,7 +332,10 @@ Response:
   "first_review_hours": null,
   "final_review_hours": null,
   "status": "submitted",
-  "rejection_reason": null
+  "rejection_reason": null,
+  "custom_fields": [
+    { "field_key": "location", "label": "地点", "value": "校内操场" }
+  ]
 }
 ```
 
@@ -341,7 +347,10 @@ Request:
 {
   "contest_name": "全国大学生数学建模竞赛",
   "award_level": "省赛一等奖",
-  "self_hours": 8
+  "self_hours": 8,
+  "custom_fields": {
+    "sponsor": "数学学院"
+  }
 }
 ```
 
@@ -357,7 +366,10 @@ Response:
   "final_review_hours": null,
   "status": "submitted",
   "rejection_reason": null,
-  "match_status": "matched"
+  "match_status": "matched",
+  "custom_fields": [
+    { "field_key": "sponsor", "label": "主办方", "value": "数学学院" }
+  ]
 }
 ```
 
@@ -447,6 +459,27 @@ Request:
 
 ## 管理接口
 
+### GET /forms/{form_type}/fields
+获取指定表单类型字段（需登录）。
+
+Response:
+```json
+[
+  {
+    "id": "<uuid>",
+    "form_type": "volunteer",
+    "field_key": "location",
+    "label": "地点",
+    "field_type": "text",
+    "required": true,
+    "order_index": 1
+  }
+]
+```
+
+### GET /competitions
+获取竞赛名称库（需登录）。
+
 ### GET /admin/competitions
 获取竞赛名称库（管理员）。
 
@@ -456,6 +489,14 @@ Request:
 Request:
 ```json
 { "name": "全国大学生数学建模竞赛" }
+```
+
+### POST /admin/competitions/import
+从 Excel 导入竞赛名称（管理员，multipart 字段 `file`）。
+
+Response:
+```json
+{ "inserted": 10, "skipped": 2 }
 ```
 
 ### GET /admin/form-fields
@@ -474,4 +515,20 @@ Request:
   "required": true,
   "order_index": 1
 }
+```
+
+### POST /admin/records/volunteer/import
+批量导入志愿服务记录（管理员，multipart 字段 `file`）。
+
+Response:
+```json
+{ "inserted": 12, "skipped": 3 }
+```
+
+### POST /admin/records/contest/import
+批量导入竞赛获奖记录（管理员，multipart 字段 `file`）。
+
+Response:
+```json
+{ "inserted": 10, "skipped": 1 }
 ```

@@ -22,6 +22,27 @@
 ## Rollback
 - 使用 git 回退本次修改文件。
 
+## Current Task: Features update from features.md
+1) 竞赛名称导入与公开读取
+- 新增竞赛库 Excel 导入接口与前端入口。
+- 新增登录用户可读取竞赛库接口，学生端下拉选择竞赛名称。
+
+2) 自定义字段与布局支持
+- 新增表单字段查询接口（按类型）。
+- 记录创建/查询/导出支持自定义字段值。
+- 前端学生填报页面动态渲染自定义字段。
+
+3) 批量导入志愿/竞赛记录
+- 管理员可通过 Excel 批量导入志愿服务与竞赛获奖记录。
+- 支持自定义字段列映射到配置字段。
+
+## Verification
+- Frontend: `pnpm test:unit`
+- Backend: `cargo test`
+
+## Rollback
+- 使用 git 回退本次修改文件。
+
 ## Goal
 Implement the core backend + frontend skeleton for the VolunteerHours system based on functionlist.md, with secure auth (Passkey/TOTP), local file storage, and detailed API docs.
 

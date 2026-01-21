@@ -4,6 +4,7 @@ export async function createVolunteer(payload: {
   title: string
   description: string
   self_hours: number
+  custom_fields?: Record<string, string>
 }): Promise<unknown> {
   return requestJson('/records/volunteer', {
     method: 'POST',
@@ -15,6 +16,7 @@ export async function createContest(payload: {
   contest_name: string
   award_level: string
   self_hours: number
+  custom_fields?: Record<string, string>
 }): Promise<unknown> {
   return requestJson('/records/contest', {
     method: 'POST',

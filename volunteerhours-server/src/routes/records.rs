@@ -6,6 +6,7 @@ use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
 };
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -13,8 +14,9 @@ use validator::Validate;
 use crate::{
     access::{require_role, require_session_user},
     entities::{
-        competition_library, contest_records, students, volunteer_records, CompetitionLibrary,
-        ContestRecord, Student, VolunteerRecord,
+        competition_library, contest_records, form_field_values, form_fields, students,
+        volunteer_records, CompetitionLibrary, ContestRecord, FormField, FormFieldValue, Student,
+        VolunteerRecord,
     },
     error::AppError,
     state::AppState,
@@ -39,6 +41,8 @@ pub struct CreateVolunteerRequest {
     pub description: String,
     /// 自评学时。
     pub self_hours: i32,
+    /// 自定义字段。
+    pub custom_fields: Option<HashMap<String, String>>,
 }
 
 /// 竞赛获奖提交请求。
@@ -52,6 +56,8 @@ pub struct CreateContestRequest {
     pub award_level: String,
     /// 自评学时。
     pub self_hours: i32,
+    /// 自定义字段。
+    pub custom_fields: Option<HashMap<String, String>>,
 }
 
 /// 志愿服务记录响应。
@@ -75,6 +81,8 @@ pub struct VolunteerRecordResponse {
     pub status: String,
     /// 不通过原因。
     pub rejection_reason: Option<String>,
+    /// 自定义字段。
+    pub custom_fields: Vec<CustomFieldValueResponse>,
 }
 
 /// 竞赛记录响应。
@@ -100,6 +108,19 @@ pub struct ContestRecordResponse {
     pub rejection_reason: Option<String>,
     /// 竞赛名称匹配标识。
     pub match_status: String,
+    /// 自定义字段。
+    pub custom_fields: Vec<CustomFieldValueResponse>,
+}
+
+/// 自定义字段响应。
+#[derive(Clone, Debug, Serialize)]
+pub struct CustomFieldValueResponse {
+    /// 字段 key。
+    pub field_key: String,
+    /// 字段标签。
+    pub label: String,
+    /// 字段值。
+    pub value: String,
 }
 
 /// 志愿服务查询条件。
@@ -150,6 +171,10 @@ pub async fn create_volunteer_record(
         .map_err(|err| AppError::Database(err.to_string()))?
         .ok_or_else(|| AppError::not_found("student not found"))?;
 
+    let custom_fields = payload.custom_fields.unwrap_or_default();
+    let form_fields = load_form_fields(&state, "volunteer").await?;
+    validate_custom_fields(&form_fields, &custom_fields)?;
+
     let now = Utc::now();
     let model = volunteer_records::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -168,7 +193,14 @@ pub async fn create_volunteer_record(
     .await
     .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(model_to_volunteer_response(model)))
+    let model_id = model.id;
+    insert_custom_fields(&state, "volunteer", model_id, &form_fields, &custom_fields).await?;
+
+    let custom_values = fetch_custom_fields(&state, "volunteer", &[model_id], &form_fields).await?;
+    Ok(Json(model_to_volunteer_response(
+        model,
+        custom_values.get(&model_id).cloned().unwrap_or_default(),
+    )))
 }
 
 /// 提交竞赛获奖记录（学生）。
@@ -190,6 +222,10 @@ pub async fn create_contest_record(
         .map_err(|err| AppError::Database(err.to_string()))?
         .ok_or_else(|| AppError::not_found("student not found"))?;
 
+    let custom_fields = payload.custom_fields.unwrap_or_default();
+    let form_fields = load_form_fields(&state, "contest").await?;
+    validate_custom_fields(&form_fields, &custom_fields)?;
+
     let now = Utc::now();
     let model = contest_records::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -209,7 +245,14 @@ pub async fn create_contest_record(
     .map_err(|err| AppError::Database(err.to_string()))?;
 
     let match_status = contest_match_status(&state, &model.contest_name).await?;
-    Ok(Json(model_to_contest_response(model, &match_status)))
+    let model_id = model.id;
+    insert_custom_fields(&state, "contest", model_id, &form_fields, &custom_fields).await?;
+    let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
+    Ok(Json(model_to_contest_response(
+        model,
+        &match_status,
+        custom_values.get(&model_id).cloned().unwrap_or_default(),
+    )))
 }
 
 /// 查询志愿服务记录（学生或审核角色）。
@@ -242,7 +285,19 @@ pub async fn list_volunteer_records(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(records.into_iter().map(model_to_volunteer_response).collect()))
+    let form_fields = load_form_fields(&state, "volunteer").await?;
+    let ids: Vec<Uuid> = records.iter().map(|record| record.id).collect();
+    let custom_values = fetch_custom_fields(&state, "volunteer", &ids, &form_fields).await?;
+
+    Ok(Json(
+        records
+            .into_iter()
+            .map(|model| {
+                let values = custom_values.get(&model.id).cloned().unwrap_or_default();
+                model_to_volunteer_response(model, values)
+            })
+            .collect(),
+    ))
 }
 
 /// 查询竞赛记录（学生或审核角色）。
@@ -275,10 +330,15 @@ pub async fn list_contest_records(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
+    let form_fields = load_form_fields(&state, "contest").await?;
+    let ids: Vec<Uuid> = records.iter().map(|record| record.id).collect();
+    let custom_values = fetch_custom_fields(&state, "contest", &ids, &form_fields).await?;
+
     let mut responses = Vec::with_capacity(records.len());
     for record in records {
         let match_status = contest_match_status(&state, &record.contest_name).await?;
-        responses.push(model_to_contest_response(record, &match_status));
+        let values = custom_values.get(&record.id).cloned().unwrap_or_default();
+        responses.push(model_to_contest_response(record, &match_status, values));
     }
 
     Ok(Json(responses))
@@ -317,7 +377,13 @@ pub async fn review_volunteer_record(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(model_to_volunteer_response(model)))
+    let form_fields = load_form_fields(&state, "volunteer").await?;
+    let model_id = model.id;
+    let custom_values = fetch_custom_fields(&state, "volunteer", &[model_id], &form_fields).await?;
+    Ok(Json(model_to_volunteer_response(
+        model,
+        custom_values.get(&model_id).cloned().unwrap_or_default(),
+    )))
 }
 
 /// 审核竞赛记录（审核人员/教师）。
@@ -354,10 +420,20 @@ pub async fn review_contest_record(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     let match_status = contest_match_status(&state, &model.contest_name).await?;
-    Ok(Json(model_to_contest_response(model, &match_status)))
+    let form_fields = load_form_fields(&state, "contest").await?;
+    let model_id = model.id;
+    let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
+    Ok(Json(model_to_contest_response(
+        model,
+        &match_status,
+        custom_values.get(&model_id).cloned().unwrap_or_default(),
+    )))
 }
 
-fn model_to_volunteer_response(model: volunteer_records::Model) -> VolunteerRecordResponse {
+fn model_to_volunteer_response(
+    model: volunteer_records::Model,
+    custom_fields: Vec<CustomFieldValueResponse>,
+) -> VolunteerRecordResponse {
     VolunteerRecordResponse {
         id: model.id,
         student_id: model.student_id,
@@ -368,12 +444,14 @@ fn model_to_volunteer_response(model: volunteer_records::Model) -> VolunteerReco
         final_review_hours: model.final_review_hours,
         status: model.status,
         rejection_reason: model.rejection_reason,
+        custom_fields,
     }
 }
 
 fn model_to_contest_response(
     model: contest_records::Model,
     match_status: &str,
+    custom_fields: Vec<CustomFieldValueResponse>,
 ) -> ContestRecordResponse {
     ContestRecordResponse {
         id: model.id,
@@ -386,6 +464,7 @@ fn model_to_contest_response(
         status: model.status,
         rejection_reason: model.rejection_reason,
         match_status: match_status.to_string(),
+        custom_fields,
     }
 }
 
@@ -435,6 +514,125 @@ fn apply_review_update(
 
     *rejection_reason = Set(None);
     Ok(())
+}
+
+async fn load_form_fields(
+    state: &AppState,
+    form_type: &str,
+) -> Result<Vec<form_fields::Model>, AppError> {
+    FormField::find()
+        .filter(form_fields::Column::FormType.eq(form_type))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))
+}
+
+fn validate_custom_fields(
+    fields: &[form_fields::Model],
+    payload: &HashMap<String, String>,
+) -> Result<(), AppError> {
+    let mut field_map = HashMap::new();
+    for field in fields {
+        field_map.insert(field.field_key.as_str(), field);
+    }
+
+    for field in fields {
+        if field.required {
+            let value = payload.get(&field.field_key);
+            if value.is_none() || value.is_some_and(|val| val.trim().is_empty()) {
+                return Err(AppError::validation("missing required custom field"));
+            }
+        }
+    }
+
+    for key in payload.keys() {
+        if !field_map.contains_key(key.as_str()) {
+            return Err(AppError::validation("unknown custom field"));
+        }
+    }
+
+    Ok(())
+}
+
+async fn insert_custom_fields(
+    state: &AppState,
+    record_type: &str,
+    record_id: Uuid,
+    fields: &[form_fields::Model],
+    payload: &HashMap<String, String>,
+) -> Result<(), AppError> {
+    let mut field_map = HashMap::new();
+    for field in fields {
+        field_map.insert(field.field_key.as_str(), field);
+    }
+
+    for (key, value) in payload {
+        if value.trim().is_empty() {
+            continue;
+        }
+        if let Some(field) = field_map.get(key.as_str()) {
+            form_field_values::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                record_type: Set(record_type.to_string()),
+                record_id: Set(record_id),
+                field_key: Set(field.field_key.clone()),
+                value: Set(value.to_string()),
+                created_at: Set(Utc::now()),
+            }
+            .insert(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn fetch_custom_fields(
+    state: &AppState,
+    record_type: &str,
+    record_ids: &[Uuid],
+    fields: &[form_fields::Model],
+) -> Result<HashMap<Uuid, Vec<CustomFieldValueResponse>>, AppError> {
+    if record_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut label_map = HashMap::new();
+    let mut order_map = HashMap::new();
+    for field in fields {
+        label_map.insert(field.field_key.as_str(), field.label.clone());
+        order_map.insert(field.field_key.as_str(), field.order_index);
+    }
+
+    let values = FormFieldValue::find()
+        .filter(form_field_values::Column::RecordType.eq(record_type))
+        .filter(form_field_values::Column::RecordId.is_in(record_ids.iter().cloned()))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let mut grouped: HashMap<Uuid, Vec<CustomFieldValueResponse>> = HashMap::new();
+    for value in values {
+        let label = label_map
+            .get(value.field_key.as_str())
+            .cloned()
+            .unwrap_or_else(|| value.field_key.clone());
+        grouped
+            .entry(value.record_id)
+            .or_default()
+            .push(CustomFieldValueResponse {
+                field_key: value.field_key,
+                label,
+                value: value.value,
+            });
+    }
+
+    for list in grouped.values_mut() {
+        list.sort_by_key(|item| order_map.get(item.field_key.as_str()).cloned().unwrap_or(0));
+    }
+
+    Ok(grouped)
 }
 
 #[cfg(test)]

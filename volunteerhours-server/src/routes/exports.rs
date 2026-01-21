@@ -16,8 +16,9 @@ use uuid::Uuid;
 use crate::{
     access::require_session_user,
     entities::{
-        contest_records, review_signatures, students, volunteer_records, ContestRecord,
-        ReviewSignature, Student, VolunteerRecord,
+        contest_records, form_field_values, form_fields, review_signatures, students,
+        volunteer_records, ContestRecord, FormField, FormFieldValue, ReviewSignature, Student,
+        VolunteerRecord,
     },
     error::AppError,
     state::AppState,
@@ -208,21 +209,21 @@ pub async fn export_record_pdf(
                 return Err(AppError::auth("forbidden"));
             }
             let summary = vec![
-                ("记录类型", "志愿服务".to_string()),
-                ("标题", record.title),
-                ("描述", record.description),
-                ("自评学时", record.self_hours.to_string()),
+                ("记录类型".to_string(), "志愿服务".to_string()),
+                ("标题".to_string(), record.title),
+                ("描述".to_string(), record.description),
+                ("自评学时".to_string(), record.self_hours.to_string()),
                 (
-                    "初审学时",
+                    "初审学时".to_string(),
                     record.first_review_hours.map_or("".to_string(), |v| v.to_string()),
                 ),
                 (
-                    "复审学时",
+                    "复审学时".to_string(),
                     record.final_review_hours.map_or("".to_string(), |v| v.to_string()),
                 ),
-                ("状态", record.status),
+                ("状态".to_string(), record.status),
                 (
-                    "不通过原因",
+                    "不通过原因".to_string(),
                     record.rejection_reason.unwrap_or_default(),
                 ),
             ];
@@ -244,21 +245,21 @@ pub async fn export_record_pdf(
                 return Err(AppError::auth("forbidden"));
             }
             let summary = vec![
-                ("记录类型", "竞赛获奖".to_string()),
-                ("竞赛名称", record.contest_name),
-                ("获奖等级", record.award_level),
-                ("自评学时", record.self_hours.to_string()),
+                ("记录类型".to_string(), "竞赛获奖".to_string()),
+                ("竞赛名称".to_string(), record.contest_name),
+                ("获奖等级".to_string(), record.award_level),
+                ("自评学时".to_string(), record.self_hours.to_string()),
                 (
-                    "初审学时",
+                    "初审学时".to_string(),
                     record.first_review_hours.map_or("".to_string(), |v| v.to_string()),
                 ),
                 (
-                    "复审学时",
+                    "复审学时".to_string(),
                     record.final_review_hours.map_or("".to_string(), |v| v.to_string()),
                 ),
-                ("状态", record.status),
+                ("状态".to_string(), record.status),
                 (
-                    "不通过原因",
+                    "不通过原因".to_string(),
                     record.rejection_reason.unwrap_or_default(),
                 ),
             ];
@@ -273,6 +274,12 @@ pub async fn export_record_pdf(
         .all(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let mut summary = summary;
+    let custom_fields = load_custom_fields(&state, &record_type, record_id).await?;
+    for field in custom_fields {
+        summary.push((field.label, field.value));
+    }
 
     let (doc, page1, layer1) = PdfDocument::new("record", Mm(210.0), Mm(297.0), "Layer 1");
     let mut layer = doc.get_page(page1).get_layer(layer1);
@@ -464,6 +471,56 @@ fn load_signature_image(path: &str) -> Option<Image> {
     }
     let image = image::io::Reader::open(path).ok()?.decode().ok()?;
     Some(Image::from_dynamic_image(&image))
+}
+
+struct CustomFieldEntry {
+    label: String,
+    value: String,
+    order_index: i32,
+}
+
+async fn load_custom_fields(
+    state: &AppState,
+    record_type: &str,
+    record_id: Uuid,
+) -> Result<Vec<CustomFieldEntry>, AppError> {
+    let fields = FormField::find()
+        .filter(form_fields::Column::FormType.eq(record_type))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if fields.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut field_map = std::collections::HashMap::new();
+    for field in fields {
+        field_map.insert(
+            field.field_key.clone(),
+            (field.label.clone(), field.order_index),
+        );
+    }
+
+    let values = FormFieldValue::find()
+        .filter(form_field_values::Column::RecordType.eq(record_type))
+        .filter(form_field_values::Column::RecordId.eq(record_id))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let mut result = Vec::new();
+    for value in values {
+        let (label, order_index) = field_map
+            .get(&value.field_key)
+            .cloned()
+            .unwrap_or_else(|| (value.field_key.clone(), 0));
+        result.push(CustomFieldEntry {
+            label,
+            value: value.value,
+            order_index,
+        });
+    }
+    result.sort_by_key(|item| item.order_index);
+    Ok(result)
 }
 
 fn draw_table_header(

@@ -10,6 +10,7 @@ pub mod admin;
 pub mod exports;
 pub mod students;
 pub mod records;
+pub mod forms;
 
 /// 构建应用路由。
 pub fn router(state: AppState) -> Router {
@@ -28,6 +29,8 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/recovery/regenerate", post(auth::recovery_regenerate))
         .route("/auth/devices", get(auth::list_devices))
         .route("/auth/devices/:device_id", delete(auth::delete_device))
+        .route("/forms/:form_type/fields", get(forms::list_form_fields_for_type))
+        .route("/competitions", get(admin::list_competitions_public))
         .route("/students", post(students::create_student))
         .route("/students/query", post(students::list_students))
         .route("/students/import", post(students::import_students))
@@ -45,7 +48,10 @@ pub fn router(state: AppState) -> Router {
         .route("/export/record/:record_type/:record_id/pdf", post(exports::export_record_pdf))
         .route("/admin/competitions", get(admin::list_competitions))
         .route("/admin/competitions", post(admin::create_competition))
+        .route("/admin/competitions/import", post(admin::import_competitions))
         .route("/admin/form-fields", get(admin::list_form_fields))
         .route("/admin/form-fields", post(admin::create_form_field))
+        .route("/admin/records/volunteer/import", post(admin::import_volunteer_records))
+        .route("/admin/records/contest/import", post(admin::import_contest_records))
         .with_state(state)
 }

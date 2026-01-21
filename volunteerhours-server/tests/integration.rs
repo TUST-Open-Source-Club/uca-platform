@@ -1,5 +1,5 @@
 use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     http::{header, Request, StatusCode},
 };
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, EntityTrait, Set};
@@ -207,6 +207,7 @@ async fn create_student(state: &AppState, student_no: &str) -> students::Model {
         major: Set("软件工程".to_string()),
         class_name: Set("软工1班".to_string()),
         phone: Set("13800000000".to_string()),
+        is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -271,6 +272,13 @@ fn multipart_request(path: &str, filename: &str, bytes: Vec<u8>) -> Request<Body
         .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
         .body(Body::from(body))
         .unwrap()
+}
+
+async fn response_json<T: serde::de::DeserializeOwned>(response: axum::response::Response) -> T {
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    serde_json::from_slice(&bytes).expect("parse json")
 }
 
 fn build_xlsx(headers: &[&str], rows: &[Vec<&str>]) -> Vec<u8> {
@@ -575,6 +583,152 @@ async fn upload_attachments_and_signatures() {
     .with_cookie(&reviewer_cookie);
     let response = ctx.app.clone().oneshot(signature).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_student_and_records() {
+    let ctx = setup_context().await;
+    reset_database(&ctx.state).await;
+
+    let admin = create_user(&ctx.state, "admin4", "admin").await;
+    let admin_cookie = create_session_cookie(&ctx.state, admin.id).await;
+
+    let student_user = create_user(&ctx.state, "2023011", "student").await;
+    create_student(&ctx.state, "2023011").await;
+    let student_cookie = create_session_cookie(&ctx.state, student_user.id).await;
+
+    let request = json_request(
+        "POST",
+        "/records/volunteer",
+        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+    )
+    .with_cookie(&student_cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let record = volunteerhours::entities::VolunteerRecord::find()
+        .one(&ctx.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri(format!("/admin/records/volunteer/{}", record.id))
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = json_request("POST", "/records/volunteer/query", json!({}))
+        .with_cookie(&admin_cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let records: Vec<serde_json::Value> = response_json(response).await;
+    assert!(records.is_empty());
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri("/admin/students/2023011")
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = json_request("POST", "/students/query", json!({}))
+        .with_cookie(&admin_cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let students: Vec<serde_json::Value> = response_json(response).await;
+    assert!(students.is_empty());
+}
+
+#[tokio::test]
+async fn purge_deleted_student_and_record() {
+    let ctx = setup_context().await;
+    reset_database(&ctx.state).await;
+
+    let admin = create_user(&ctx.state, "admin5", "admin").await;
+    let admin_cookie = create_session_cookie(&ctx.state, admin.id).await;
+
+    let student_user = create_user(&ctx.state, "2023012", "student").await;
+    create_student(&ctx.state, "2023012").await;
+    let student_cookie = create_session_cookie(&ctx.state, student_user.id).await;
+
+    let request = json_request(
+        "POST",
+        "/records/volunteer",
+        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+    )
+    .with_cookie(&student_cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let record = volunteerhours::entities::VolunteerRecord::find()
+        .one(&ctx.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri(format!("/admin/records/volunteer/{}", record.id))
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri(format!("/admin/purge/records/volunteer/{}", record.id))
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/deleted/records/volunteer")
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let deleted_records: Vec<serde_json::Value> = response_json(response).await;
+    assert!(deleted_records.is_empty());
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri("/admin/students/2023012")
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("DELETE")
+        .uri("/admin/purge/students/2023012")
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/deleted/students")
+        .header(header::COOKIE, admin_cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let deleted_students: Vec<serde_json::Value> = response_json(response).await;
+    assert!(deleted_students.is_empty());
 }
 
 #[tokio::test]

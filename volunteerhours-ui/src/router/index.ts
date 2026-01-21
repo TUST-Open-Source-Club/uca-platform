@@ -8,6 +8,7 @@ import RecordsView from '../views/RecordsView.vue'
 import ReviewDashboard from '../views/ReviewDashboard.vue'
 import StudentDashboard from '../views/StudentDashboard.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
+import PurgeView from '../views/PurgeView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: '/records', component: RecordsView },
     { path: '/review', component: ReviewDashboard },
     { path: '/admin', component: AdminDashboard },
+    { path: '/purge', component: PurgeView },
     { path: '/exports', component: ExportView },
     { path: '/devices', component: DevicesView },
   ],
@@ -32,6 +34,7 @@ router.beforeEach(async (to) => {
   await auth.ensureSession()
   if (!auth.loggedIn) return '/login'
   if (to.path === '/admin' && auth.role !== 'admin') return auth.homePath()
+  if (to.path === '/purge' && auth.role !== 'admin') return auth.homePath()
   if (to.path === '/review' && auth.role === 'student') return auth.homePath()
   return true
 })

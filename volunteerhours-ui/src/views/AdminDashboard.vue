@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { UploadFile } from 'element-plus'
 import {
   createCompetition,
   createFormField,
+  deleteContestRecord,
+  deleteStudent,
+  deleteVolunteerRecord,
   importCompetitions,
   importContestRecords,
   importVolunteerRecords,
   listCompetitions,
   listFormFields,
 } from '../api/admin'
-import { importStudents } from '../api/students'
+import { importStudents, queryStudents } from '../api/students'
+import { queryContest, queryVolunteer } from '../api/records'
 import { useRequest } from '../composables/useRequest'
 
 const competitionFormRef = ref()
@@ -21,6 +26,9 @@ const volunteerImportRef = ref()
 const contestImportRef = ref()
 const competitions = ref('')
 const formFields = ref('')
+const students = ref<any[]>([])
+const volunteerRecords = ref<any[]>([])
+const contestRecords = ref<any[]>([])
 const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
 const volunteerImportFile = ref<File | null>(null)
@@ -33,6 +41,9 @@ const competitionImportRequest = useRequest()
 const volunteerImportRequest = useRequest()
 const contestImportRequest = useRequest()
 const listRequest = useRequest()
+const deleteRequest = useRequest()
+const listDataRequest = useRequest()
+const router = useRouter()
 
 const competitionForm = reactive({
   name: '',
@@ -201,6 +212,44 @@ const handleContestFileChange = (file: UploadFile) => {
   contestImportFile.value = file.raw ?? null
   contestImportForm.fileName = file.name ?? ''
 }
+
+const loadDataLists = async () => {
+  await listDataRequest.run(async () => {
+    const [studentList, volunteerList, contestList] = await Promise.all([
+      queryStudents({}),
+      queryVolunteer(),
+      queryContest(),
+    ])
+    students.value = studentList
+    volunteerRecords.value = volunteerList
+    contestRecords.value = contestList
+  })
+}
+
+const handleDeleteStudent = async (studentNo: string) => {
+  await deleteRequest.run(async () => {
+    await deleteStudent(studentNo)
+    await loadDataLists()
+  }, { successMessage: '学生已删除' })
+}
+
+const handleDeleteVolunteerRecord = async (recordId: string) => {
+  await deleteRequest.run(async () => {
+    await deleteVolunteerRecord(recordId)
+    await loadDataLists()
+  }, { successMessage: '志愿记录已删除' })
+}
+
+const handleDeleteContestRecord = async (recordId: string) => {
+  await deleteRequest.run(async () => {
+    await deleteContestRecord(recordId)
+    await loadDataLists()
+  }, { successMessage: '竞赛记录已删除' })
+}
+
+const handleOpenPurge = async () => {
+  await router.push('/purge')
+}
 </script>
 
 <template>
@@ -361,6 +410,69 @@ const handleContestFileChange = (file: UploadFile) => {
       </el-form>
       <pre v-if="formFields">{{ formFields }}</pre>
     </el-card>
+
+    <el-card class="card">
+      <h3>数据删除（软删除）</h3>
+      <p>仅允许删除未审核记录，删除后可在“彻底删除”页面清理。</p>
+      <el-button :loading="listDataRequest.loading" @click="loadDataLists">加载列表</el-button>
+      <el-button style="margin-left: 8px" @click="handleOpenPurge">进入彻底删除</el-button>
+
+      <h4 style="margin-top: 16px">学生</h4>
+      <el-table :data="students">
+        <el-table-column prop="student_no" label="学号" />
+        <el-table-column prop="name" label="姓名" />
+        <el-table-column label="操作">
+          <template #default="scope">
+            <el-button
+              type="danger"
+              size="small"
+              :loading="deleteRequest.loading"
+              @click="handleDeleteStudent(scope.row.student_no)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <h4 style="margin-top: 16px">志愿服务记录</h4>
+      <el-table :data="volunteerRecords">
+        <el-table-column prop="title" label="标题" />
+        <el-table-column prop="status" label="状态" />
+        <el-table-column label="操作">
+          <template #default="scope">
+            <el-button
+              type="danger"
+              size="small"
+              :disabled="scope.row.status !== 'submitted'"
+              :loading="deleteRequest.loading"
+              @click="handleDeleteVolunteerRecord(scope.row.id)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <h4 style="margin-top: 16px">竞赛记录</h4>
+      <el-table :data="contestRecords">
+        <el-table-column prop="contest_name" label="竞赛名称" />
+        <el-table-column prop="status" label="状态" />
+        <el-table-column label="操作">
+          <template #default="scope">
+            <el-button
+              type="danger"
+              size="small"
+              :disabled="scope.row.status !== 'submitted'"
+              :loading="deleteRequest.loading"
+              @click="handleDeleteContestRecord(scope.row.id)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </div>
 
   <el-alert
@@ -371,7 +483,9 @@ const handleContestFileChange = (file: UploadFile) => {
       listRequest.error ||
       competitionImportRequest.error ||
       volunteerImportRequest.error ||
-      contestImportRequest.error
+      contestImportRequest.error ||
+      deleteRequest.error ||
+      listDataRequest.error
     "
     class="card"
     style="margin-top: 24px"
@@ -384,7 +498,9 @@ const handleContestFileChange = (file: UploadFile) => {
       listRequest.error ||
       competitionImportRequest.error ||
       volunteerImportRequest.error ||
-      contestImportRequest.error
+      contestImportRequest.error ||
+      deleteRequest.error ||
+      listDataRequest.error
     "
     :closable="false"
   />

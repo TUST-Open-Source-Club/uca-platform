@@ -15,6 +15,7 @@ pub struct Model {
     pub major: String,
     pub class_name: String,
     pub phone: String,
+    pub is_deleted: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

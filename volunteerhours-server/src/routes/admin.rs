@@ -1,10 +1,10 @@
 //! 管理员维护接口。
 
-use axum::{extract::{State, Multipart}, Json};
+use axum::{extract::{State, Multipart, Path}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
 use chrono::Utc;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -14,8 +14,9 @@ use validator::Validate;
 use crate::{
     access::{require_role, require_session_user},
     entities::{
-        competition_library, form_field_values, form_fields, contest_records, students,
-        volunteer_records, CompetitionLibrary, FormField, Student,
+        attachments, competition_library, contest_records, form_field_values, form_fields,
+        review_signatures, students, volunteer_records, Attachment, CompetitionLibrary, ContestRecord,
+        FormField, FormFieldValue, ReviewSignature, Student, VolunteerRecord,
     },
     error::AppError,
     state::AppState,
@@ -305,6 +306,420 @@ pub async fn create_form_field(
     }))
 }
 
+/// 已删除志愿记录响应。
+#[derive(Debug, Serialize)]
+pub struct DeletedVolunteerRecordResponse {
+    /// 记录 ID。
+    pub id: Uuid,
+    /// 学生 ID。
+    pub student_id: Uuid,
+    /// 标题。
+    pub title: String,
+    /// 状态。
+    pub status: String,
+    /// 创建时间。
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 已删除竞赛记录响应。
+#[derive(Debug, Serialize)]
+pub struct DeletedContestRecordResponse {
+    /// 记录 ID。
+    pub id: Uuid,
+    /// 学生 ID。
+    pub student_id: Uuid,
+    /// 竞赛名称。
+    pub contest_name: String,
+    /// 状态。
+    pub status: String,
+    /// 创建时间。
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 获取已删除学生列表（仅管理员）。
+pub async fn list_deleted_students(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<crate::routes::students::StudentResponse>>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let results = Student::find()
+        .filter(students::Column::IsDeleted.eq(true))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(
+        results
+            .into_iter()
+            .map(crate::routes::students::StudentResponse::from)
+            .collect(),
+    ))
+}
+
+/// 获取已删除志愿服务记录（仅管理员）。
+pub async fn list_deleted_volunteer_records(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<DeletedVolunteerRecordResponse>>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let records = VolunteerRecord::find()
+        .filter(volunteer_records::Column::IsDeleted.eq(true))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(
+        records
+            .into_iter()
+            .map(|record| DeletedVolunteerRecordResponse {
+                id: record.id,
+                student_id: record.student_id,
+                title: record.title,
+                status: record.status,
+                created_at: record.created_at,
+            })
+            .collect(),
+    ))
+}
+
+/// 获取已删除竞赛记录（仅管理员）。
+pub async fn list_deleted_contest_records(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<DeletedContestRecordResponse>>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let records = ContestRecord::find()
+        .filter(contest_records::Column::IsDeleted.eq(true))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(
+        records
+            .into_iter()
+            .map(|record| DeletedContestRecordResponse {
+                id: record.id,
+                student_id: record.student_id,
+                contest_name: record.contest_name,
+                status: record.status,
+                created_at: record.created_at,
+            })
+            .collect(),
+    ))
+}
+
+/// 删除学生（仅管理员，软删除）。
+pub async fn delete_student(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    if student.is_deleted {
+        return Ok(Json(serde_json::json!({ "deleted": true })));
+    }
+
+    let mut active: students::ActiveModel = student.into();
+    active.is_deleted = Set(true);
+    active.updated_at = Set(Utc::now());
+    active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 彻底删除学生（仅管理员）。
+pub async fn purge_student(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    if !student.is_deleted {
+        return Err(AppError::bad_request("student must be soft deleted first"));
+    }
+
+    let transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let volunteer_records = VolunteerRecord::find()
+        .filter(volunteer_records::Column::StudentId.eq(student.id))
+        .all(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    let contest_records = ContestRecord::find()
+        .filter(contest_records::Column::StudentId.eq(student.id))
+        .all(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let volunteer_ids: Vec<Uuid> = volunteer_records.iter().map(|record| record.id).collect();
+    let contest_ids: Vec<Uuid> = contest_records.iter().map(|record| record.id).collect();
+
+    if !volunteer_ids.is_empty() {
+        FormFieldValue::delete_many()
+            .filter(form_field_values::Column::RecordType.eq("volunteer"))
+            .filter(form_field_values::Column::RecordId.is_in(volunteer_ids.iter().cloned()))
+            .exec(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        ReviewSignature::delete_many()
+            .filter(review_signatures::Column::RecordType.eq("volunteer"))
+            .filter(review_signatures::Column::RecordId.is_in(volunteer_ids.iter().cloned()))
+            .exec(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    if !contest_ids.is_empty() {
+        FormFieldValue::delete_many()
+            .filter(form_field_values::Column::RecordType.eq("contest"))
+            .filter(form_field_values::Column::RecordId.is_in(contest_ids.iter().cloned()))
+            .exec(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        ReviewSignature::delete_many()
+            .filter(review_signatures::Column::RecordType.eq("contest"))
+            .filter(review_signatures::Column::RecordId.is_in(contest_ids.iter().cloned()))
+            .exec(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    Attachment::delete_many()
+        .filter(attachments::Column::StudentId.eq(student.id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    VolunteerRecord::delete_many()
+        .filter(volunteer_records::Column::StudentId.eq(student.id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    ContestRecord::delete_many()
+        .filter(contest_records::Column::StudentId.eq(student.id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Student::delete_by_id(student.id)
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 删除未审核志愿记录（仅管理员，软删除）。
+pub async fn delete_volunteer_record(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(record_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let record = VolunteerRecord::find()
+        .filter(volunteer_records::Column::Id.eq(record_id))
+        .filter(volunteer_records::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("record not found"))?;
+
+    if record.status != "submitted" {
+        return Err(AppError::bad_request("reviewed record cannot be deleted"));
+    }
+
+    let mut active: volunteer_records::ActiveModel = record.into();
+    active.is_deleted = Set(true);
+    active.updated_at = Set(Utc::now());
+    active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 彻底删除志愿记录（仅管理员）。
+pub async fn purge_volunteer_record(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(record_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let record = VolunteerRecord::find()
+        .filter(volunteer_records::Column::Id.eq(record_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("record not found"))?;
+    if !record.is_deleted {
+        return Err(AppError::bad_request("record must be soft deleted first"));
+    }
+
+    let transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    FormFieldValue::delete_many()
+        .filter(form_field_values::Column::RecordType.eq("volunteer"))
+        .filter(form_field_values::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    ReviewSignature::delete_many()
+        .filter(review_signatures::Column::RecordType.eq("volunteer"))
+        .filter(review_signatures::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Attachment::delete_many()
+        .filter(attachments::Column::RecordType.eq("volunteer"))
+        .filter(attachments::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    VolunteerRecord::delete_by_id(record_id)
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 删除未审核竞赛记录（仅管理员，软删除）。
+pub async fn delete_contest_record(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(record_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let record = ContestRecord::find()
+        .filter(contest_records::Column::Id.eq(record_id))
+        .filter(contest_records::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("record not found"))?;
+
+    if record.status != "submitted" {
+        return Err(AppError::bad_request("reviewed record cannot be deleted"));
+    }
+
+    let mut active: contest_records::ActiveModel = record.into();
+    active.is_deleted = Set(true);
+    active.updated_at = Set(Utc::now());
+    active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 彻底删除竞赛记录（仅管理员）。
+pub async fn purge_contest_record(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(record_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let record = ContestRecord::find()
+        .filter(contest_records::Column::Id.eq(record_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("record not found"))?;
+    if !record.is_deleted {
+        return Err(AppError::bad_request("record must be soft deleted first"));
+    }
+
+    let transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    FormFieldValue::delete_many()
+        .filter(form_field_values::Column::RecordType.eq("contest"))
+        .filter(form_field_values::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    ReviewSignature::delete_many()
+        .filter(review_signatures::Column::RecordType.eq("contest"))
+        .filter(review_signatures::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Attachment::delete_many()
+        .filter(attachments::Column::RecordType.eq("contest"))
+        .filter(attachments::Column::RecordId.eq(record_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    ContestRecord::delete_by_id(record_id)
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
 /// 批量导入志愿服务记录（仅管理员）。
 pub async fn import_volunteer_records(
     State(state): State<AppState>,
@@ -351,6 +766,7 @@ pub async fn import_volunteer_records(
 
         let student = Student::find()
             .filter(students::Column::StudentNo.eq(&student_no))
+            .filter(students::Column::IsDeleted.eq(false))
             .one(&transaction)
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
@@ -388,6 +804,7 @@ pub async fn import_volunteer_records(
             final_review_hours: Set(final_review),
             status: Set(status),
             rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
+            is_deleted: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -469,6 +886,7 @@ pub async fn import_contest_records(
 
         let student = Student::find()
             .filter(students::Column::StudentNo.eq(&student_no))
+            .filter(students::Column::IsDeleted.eq(false))
             .one(&transaction)
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
@@ -506,6 +924,7 @@ pub async fn import_contest_records(
             final_review_hours: Set(final_review),
             status: Set(status),
             rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
+            is_deleted: Set(false),
             created_at: Set(now),
             updated_at: Set(now),
         };

@@ -99,7 +99,23 @@ pub async fn create_student(
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
-    if exists.is_some() {
+    if let Some(existing) = exists {
+        if existing.is_deleted {
+            let mut active: students::ActiveModel = existing.into();
+            active.name = Set(payload.name.clone());
+            active.gender = Set(payload.gender.clone());
+            active.department = Set(payload.department.clone());
+            active.major = Set(payload.major.clone());
+            active.class_name = Set(payload.class_name.clone());
+            active.phone = Set(payload.phone.clone());
+            active.is_deleted = Set(false);
+            active.updated_at = Set(Utc::now());
+            let model = active
+                .update(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
+            return Ok(Json(StudentResponse::from(model)));
+        }
         return Err(AppError::bad_request("student number exists"));
     }
 
@@ -114,6 +130,7 @@ pub async fn create_student(
         major: Set(payload.major.clone()),
         class_name: Set(payload.class_name.clone()),
         phone: Set(payload.phone.clone()),
+        is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -131,6 +148,7 @@ pub async fn create_student(
         major: payload.major,
         class_name: payload.class_name,
         phone: payload.phone,
+        is_deleted: false,
         created_at: now,
         updated_at: now,
     };
@@ -161,7 +179,7 @@ pub async fn list_students(
         return Err(AppError::auth("forbidden"));
     }
 
-    let mut finder = Student::find();
+    let mut finder = Student::find().filter(students::Column::IsDeleted.eq(false));
     if let Some(value) = query.department {
         finder = finder.filter(students::Column::Department.eq(value));
     }
@@ -277,6 +295,7 @@ pub async fn import_students(
             active.class_name = Set(class_name);
             active.phone = Set(phone);
             active.updated_at = Set(now);
+            active.is_deleted = Set(false);
             active
                 .update(&transaction)
                 .await
@@ -292,6 +311,7 @@ pub async fn import_students(
                 major: Set(major),
                 class_name: Set(class_name),
                 phone: Set(phone),
+                is_deleted: Set(false),
                 created_at: Set(now),
                 updated_at: Set(now),
             };

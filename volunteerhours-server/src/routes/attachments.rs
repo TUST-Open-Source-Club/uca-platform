@@ -75,11 +75,21 @@ pub async fn upload_review_signature(
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
+            if record.is_deleted {
+                return Err(AppError::not_found("record not found"));
+            }
             Student::find_by_id(record.student_id)
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
-                .ok_or_else(|| AppError::not_found("student not found"))?
+                .ok_or_else(|| AppError::not_found("student not found"))
+                .and_then(|student| {
+                    if student.is_deleted {
+                        Err(AppError::not_found("student not found"))
+                    } else {
+                        Ok(student)
+                    }
+                })?
         }
         "contest" => {
             let record = ContestRecord::find_by_id(record_id)
@@ -87,11 +97,21 @@ pub async fn upload_review_signature(
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
+            if record.is_deleted {
+                return Err(AppError::not_found("record not found"));
+            }
             Student::find_by_id(record.student_id)
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
-                .ok_or_else(|| AppError::not_found("student not found"))?
+                .ok_or_else(|| AppError::not_found("student not found"))
+                .and_then(|student| {
+                    if student.is_deleted {
+                        Err(AppError::not_found("student not found"))
+                    } else {
+                        Ok(student)
+                    }
+                })?
         }
         _ => return Err(AppError::bad_request("invalid record type")),
     };
@@ -141,6 +161,7 @@ async fn upload_record_attachment(
 
     let student = Student::find()
         .filter(students::Column::StudentNo.eq(&user.username))
+        .filter(students::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -193,6 +214,9 @@ async fn ensure_record_ownership(
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
+            if record.is_deleted {
+                return Err(AppError::not_found("record not found"));
+            }
             if record.student_id != student_id {
                 return Err(AppError::auth("forbidden"));
             }
@@ -203,6 +227,9 @@ async fn ensure_record_ownership(
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
+            if record.is_deleted {
+                return Err(AppError::not_found("record not found"));
+            }
             if record.student_id != student_id {
                 return Err(AppError::auth("forbidden"));
             }

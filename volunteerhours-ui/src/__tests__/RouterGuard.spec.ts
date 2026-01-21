@@ -49,6 +49,16 @@ describe('Router guards', () => {
     expect(router.currentRoute.value.fullPath).toBe('/review')
   })
 
+  it('redirects non-admin away from purge route', async () => {
+    const auth = useAuthStore()
+    auth.loggedIn = true
+    auth.role = 'teacher'
+    auth.sessionChecked = true
+    await router.push('/purge')
+    await router.isReady()
+    expect(router.currentRoute.value.fullPath).toBe('/review')
+  })
+
   it('redirects student away from review route', async () => {
     const auth = useAuthStore()
     auth.loggedIn = true

@@ -16,6 +16,7 @@ pub struct Model {
     pub final_review_hours: Option<i32>,
     pub status: String,
     pub rejection_reason: Option<String>,
+    pub is_deleted: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

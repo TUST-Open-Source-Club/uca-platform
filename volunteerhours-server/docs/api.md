@@ -506,7 +506,7 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 ```
 
 ### GET /competitions
-获取竞赛名称库（需登录）。
+获取竞赛名称库（无需登录，只读）。
 
 响应：
 ```json
@@ -565,6 +565,69 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 表单类型（form_type）建议值：
 ```
 volunteer | contest | summary | student_export
+```
+
+### GET /admin/deleted/students
+获取已删除学生列表（管理员）。
+
+### GET /admin/deleted/records/volunteer
+获取已删除志愿记录（管理员）。
+
+### GET /admin/deleted/records/contest
+获取已删除竞赛记录（管理员）。
+
+### DELETE /admin/students/{student_no}
+软删除学生（管理员）。
+
+响应：
+```json
+{ "deleted": true }
+```
+
+说明：仅设置 `is_deleted=1`，已审核记录不会被删除。
+
+### DELETE /admin/purge/students/{student_no}
+彻底删除学生（管理员，仅允许删除已软删除的学生）。
+
+响应：
+```json
+{ "deleted": true }
+```
+
+### DELETE /admin/records/volunteer/{record_id}
+软删除未审核的志愿服务记录（管理员）。
+
+响应：
+```json
+{ "deleted": true }
+```
+
+说明：仅允许删除 `status=submitted` 的记录。
+
+### DELETE /admin/purge/records/volunteer/{record_id}
+彻底删除志愿服务记录（管理员，仅允许删除已软删除的记录）。
+
+响应：
+```json
+{ "deleted": true }
+```
+
+### DELETE /admin/records/contest/{record_id}
+软删除未审核的竞赛记录（管理员）。
+
+响应：
+```json
+{ "deleted": true }
+```
+
+说明：仅允许删除 `status=submitted` 的记录。
+
+### DELETE /admin/purge/records/contest/{record_id}
+彻底删除竞赛记录（管理员，仅允许删除已软删除的记录）。
+
+响应：
+```json
+{ "deleted": true }
 ```
 
 ### POST /admin/records/volunteer/import

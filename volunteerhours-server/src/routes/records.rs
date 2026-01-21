@@ -3,7 +3,10 @@
 use axum::{extract::State, Json, extract::Path};
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
+    Set,
+};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -164,6 +167,7 @@ pub async fn create_volunteer_record(
 
     let student = Student::find()
         .filter(students::Column::StudentNo.eq(&user.username))
+        .filter(students::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -185,6 +189,7 @@ pub async fn create_volunteer_record(
         final_review_hours: Set(None),
         status: Set(STATUS_SUBMITTED.to_string()),
         rejection_reason: Set(None),
+        is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -207,6 +212,7 @@ pub async fn create_volunteer_record(
         final_review_hours: None,
         status: STATUS_SUBMITTED.to_string(),
         rejection_reason: None,
+        is_deleted: false,
         created_at: now,
         updated_at: now,
     };
@@ -230,6 +236,7 @@ pub async fn create_contest_record(
 
     let student = Student::find()
         .filter(students::Column::StudentNo.eq(&user.username))
+        .filter(students::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -251,6 +258,7 @@ pub async fn create_contest_record(
         final_review_hours: Set(None),
         status: Set(STATUS_SUBMITTED.to_string()),
         rejection_reason: Set(None),
+        is_deleted: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -273,6 +281,7 @@ pub async fn create_contest_record(
         final_review_hours: None,
         status: STATUS_SUBMITTED.to_string(),
         rejection_reason: None,
+        is_deleted: false,
         created_at: now,
         updated_at: now,
     };
@@ -291,10 +300,11 @@ pub async fn list_volunteer_records(
 ) -> Result<Json<Vec<VolunteerRecordResponse>>, AppError> {
     let user = require_session_user(&state, &jar).await?;
 
-    let mut finder = VolunteerRecord::find();
+    let mut finder = VolunteerRecord::find().filter(volunteer_records::Column::IsDeleted.eq(false));
     if user.role == "student" {
         let student = Student::find()
             .filter(students::Column::StudentNo.eq(&user.username))
+            .filter(students::Column::IsDeleted.eq(false))
             .one(&state.db)
             .await
             .map_err(|err| AppError::Database(err.to_string()))?
@@ -302,6 +312,10 @@ pub async fn list_volunteer_records(
         finder = finder.filter(volunteer_records::Column::StudentId.eq(student.id));
     } else if user.role != "admin" && user.role != "teacher" && user.role != "reviewer" {
         return Err(AppError::auth("forbidden"));
+    } else {
+        finder = finder
+            .join(JoinType::InnerJoin, volunteer_records::Relation::Student.def())
+            .filter(students::Column::IsDeleted.eq(false));
     }
 
     if let Some(status) = query.status {
@@ -336,10 +350,11 @@ pub async fn list_contest_records(
 ) -> Result<Json<Vec<ContestRecordResponse>>, AppError> {
     let user = require_session_user(&state, &jar).await?;
 
-    let mut finder = ContestRecord::find();
+    let mut finder = ContestRecord::find().filter(contest_records::Column::IsDeleted.eq(false));
     if user.role == "student" {
         let student = Student::find()
             .filter(students::Column::StudentNo.eq(&user.username))
+            .filter(students::Column::IsDeleted.eq(false))
             .one(&state.db)
             .await
             .map_err(|err| AppError::Database(err.to_string()))?
@@ -347,6 +362,10 @@ pub async fn list_contest_records(
         finder = finder.filter(contest_records::Column::StudentId.eq(student.id));
     } else if user.role != "admin" && user.role != "teacher" && user.role != "reviewer" {
         return Err(AppError::auth("forbidden"));
+    } else {
+        finder = finder
+            .join(JoinType::InnerJoin, contest_records::Relation::Student.def())
+            .filter(students::Column::IsDeleted.eq(false));
     }
 
     if let Some(status) = query.status {
@@ -385,7 +404,9 @@ pub async fn review_volunteer_record(
         .validate()
         .map_err(|_| AppError::validation("invalid review payload"))?;
 
-    let record = VolunteerRecord::find_by_id(record_id)
+    let record = VolunteerRecord::find()
+        .filter(volunteer_records::Column::Id.eq(record_id))
+        .filter(volunteer_records::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -427,7 +448,9 @@ pub async fn review_contest_record(
         .validate()
         .map_err(|_| AppError::validation("invalid review payload"))?;
 
-    let record = ContestRecord::find_by_id(record_id)
+    let record = ContestRecord::find()
+        .filter(contest_records::Column::Id.eq(record_id))
+        .filter(contest_records::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -765,6 +788,7 @@ mod tests {
             final_review_hours: None,
             status: STATUS_SUBMITTED.to_string(),
             rejection_reason: None,
+            is_deleted: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -783,6 +807,7 @@ mod tests {
             final_review_hours: None,
             status: STATUS_SUBMITTED.to_string(),
             rejection_reason: None,
+            is_deleted: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

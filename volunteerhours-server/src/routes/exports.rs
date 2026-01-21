@@ -58,6 +58,7 @@ pub async fn export_summary_excel(
     }
 
     let students = finder
+        .filter(students::Column::IsDeleted.eq(false))
         .all(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
@@ -111,6 +112,7 @@ pub async fn export_student_excel(
 
     let student = Student::find()
         .filter(students::Column::StudentNo.eq(&student_no))
+        .filter(students::Column::IsDeleted.eq(false))
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -160,12 +162,15 @@ pub async fn export_record_pdf(
 
     let (student, summary) = match record_type.as_str() {
         "volunteer" => {
-            let record = VolunteerRecord::find_by_id(record_id)
+            let record = VolunteerRecord::find()
+                .filter(volunteer_records::Column::Id.eq(record_id))
+                .filter(volunteer_records::Column::IsDeleted.eq(false))
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
             let student = Student::find_by_id(record.student_id)
+                .filter(students::Column::IsDeleted.eq(false))
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
@@ -196,12 +201,15 @@ pub async fn export_record_pdf(
             (student, summary)
         }
         "contest" => {
-            let record = ContestRecord::find_by_id(record_id)
+            let record = ContestRecord::find()
+                .filter(contest_records::Column::Id.eq(record_id))
+                .filter(contest_records::Column::IsDeleted.eq(false))
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
                 .ok_or_else(|| AppError::not_found("record not found"))?;
             let student = Student::find_by_id(record.student_id)
+                .filter(students::Column::IsDeleted.eq(false))
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?
@@ -373,11 +381,13 @@ async fn compute_student_hours(
 ) -> Result<(i32, i32, String), AppError> {
     let volunteer = VolunteerRecord::find()
         .filter(volunteer_records::Column::StudentId.eq(student_id))
+        .filter(volunteer_records::Column::IsDeleted.eq(false))
         .all(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
     let contest = ContestRecord::find()
         .filter(contest_records::Column::StudentId.eq(student_id))
+        .filter(contest_records::Column::IsDeleted.eq(false))
         .all(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
@@ -666,6 +676,7 @@ mod tests {
             major: "软件工程".to_string(),
             class_name: "软工1班".to_string(),
             phone: "13800000000".to_string(),
+            is_deleted: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

@@ -9,6 +9,7 @@ import AdminDashboard from '../views/AdminDashboard.vue'
 import ExportView from '../views/ExportView.vue'
 import DevicesView from '../views/DevicesView.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
+import PurgeView from '../views/PurgeView.vue'
 
 vi.mock('../api/forms', () => ({
   listFormFieldsByType: vi.fn().mockResolvedValue([
@@ -45,6 +46,15 @@ vi.mock('../api/admin', () => ({
   importContestRecords: vi.fn().mockResolvedValue({}),
   listCompetitions: vi.fn().mockResolvedValue([]),
   listFormFields: vi.fn().mockResolvedValue([]),
+  deleteStudent: vi.fn().mockResolvedValue({}),
+  deleteVolunteerRecord: vi.fn().mockResolvedValue({}),
+  deleteContestRecord: vi.fn().mockResolvedValue({}),
+  listDeletedStudents: vi.fn().mockResolvedValue([]),
+  listDeletedVolunteerRecords: vi.fn().mockResolvedValue([]),
+  listDeletedContestRecords: vi.fn().mockResolvedValue([]),
+  purgeStudent: vi.fn().mockResolvedValue({}),
+  purgeVolunteerRecord: vi.fn().mockResolvedValue({}),
+  purgeContestRecord: vi.fn().mockResolvedValue({}),
 }))
 
 vi.mock('../api/exports', () => ({
@@ -74,6 +84,8 @@ const stubs = {
   'el-option': { props: ['label'], template: '<option>{{ label }}</option>' },
   'el-alert': { template: '<div />' },
   'el-upload': { template: '<div><slot /></div>' },
+  'el-table': { template: '<table><slot /></table>' },
+  'el-table-column': { template: '<col />' },
 }
 
 describe('Views', () => {
@@ -95,7 +107,11 @@ describe('Views', () => {
   })
 
   it('renders admin dashboard', () => {
-    const wrapper = mount(AdminDashboard, { global: { stubs } })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+    const wrapper = mount(AdminDashboard, { global: { stubs, plugins: [createPinia(), router] } })
     expect(wrapper.text()).toContain('管理台')
     expect(wrapper.text()).toContain('竞赛名称库导入')
   })
@@ -108,6 +124,11 @@ describe('Views', () => {
   it('renders devices view', () => {
     const wrapper = mount(DevicesView, { global: { stubs } })
     expect(wrapper.text()).toContain('设备与恢复码')
+  })
+
+  it('renders purge view', () => {
+    const wrapper = mount(PurgeView, { global: { stubs } })
+    expect(wrapper.text()).toContain('彻底删除')
   })
 
   it('renders two factor view', async () => {

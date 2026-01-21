@@ -389,3 +389,45 @@ Request:
   "rejection_reason": null
 }
 ```
+
+## 附件与签名
+
+### POST /attachments/volunteer/{record_id}
+上传志愿服务附件（学生本人，multipart `file`）。
+
+Response:
+```json
+{ "id": "<uuid>", "stored_name": "..." }
+```
+
+### POST /attachments/contest/{record_id}
+上传竞赛附件（学生本人，multipart `file`）。
+
+Response:
+```json
+{ "id": "<uuid>", "stored_name": "..." }
+```
+
+### POST /signatures/{record_type}/{record_id}/{stage}
+上传审核签名（stage: first/final）。
+
+Response:
+```json
+{ "id": "<uuid>", "signature_path": "..." }
+```
+
+## 导出
+
+### POST /export/summary/excel
+导出学院/专业/班级汇总表。
+
+Request:
+```json
+{ "department": "信息学院", "major": "软件工程", "class_name": "软工1班" }
+```
+
+### POST /export/student/{student_no}/excel
+导出个人学时专项表。
+
+### POST /export/record/{record_type}/{record_id}/pdf
+导出单条记录 PDF。

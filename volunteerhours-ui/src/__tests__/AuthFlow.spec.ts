@@ -27,6 +27,10 @@ vi.mock('../api/auth', () => ({
   getCurrentUser: (...args: unknown[]) => getCurrentUser(...args),
 }))
 
+vi.mock('../api/catalog', () => ({
+  listCompetitionsPublic: vi.fn().mockResolvedValue([]),
+}))
+
 vi.mock('../utils/webauthn', () => ({
   normalizeRequestOptions: (options: unknown) => options,
   credentialToJson: (credential: unknown) => credential,
@@ -50,6 +54,9 @@ const stubs = {
   'el-select': { template: '<select><slot /></select>' },
   'el-option': { template: '<option><slot /></option>' },
   'el-alert': { template: '<div />' },
+  'el-table': { template: '<table><slot /></table>' },
+  'el-table-column': { template: '<col />' },
+  'el-empty': { template: '<div />' },
 }
 
 const buildRouter = () =>

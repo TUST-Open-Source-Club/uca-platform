@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { passkeyFinish, passkeyStart, recoveryVerify, totpVerify } from '../api/auth'
+import { listCompetitionsPublic } from '../api/catalog'
 import { useRequest } from '../composables/useRequest'
 import { useAuthStore } from '../stores/auth'
 import { credentialToJson, normalizeRequestOptions } from '../utils/webauthn'
@@ -10,6 +11,8 @@ const formRef = ref()
 const result = ref('')
 const router = useRouter()
 const request = useRequest()
+const competitionsRequest = useRequest()
+const competitions = ref<{ id: string; name: string }[]>([])
 
 const form = reactive({
   username: '',
@@ -34,6 +37,19 @@ const rules = {
     },
   ],
 }
+
+const loadCompetitions = async () => {
+  await competitionsRequest.run(
+    async () => {
+      competitions.value = await listCompetitionsPublic()
+    },
+    { silent: true },
+  )
+}
+
+onMounted(() => {
+  void loadCompetitions()
+})
 
 const handleLogin = async () => {
   if (!formRef.value) return
@@ -96,6 +112,22 @@ const handleLogin = async () => {
     <h1>欢迎进入志愿时长与竞赛统计平台</h1>
     <p>请使用 Passkey 或 TOTP 完成认证。系统不支持纯密码登录。</p>
   </section>
+
+  <el-card class="card" style="margin-top: 16px">
+    <h3>竞赛清单（仅查询）</h3>
+    <el-table v-if="competitions.length" :data="competitions">
+      <el-table-column prop="name" label="竞赛名称" />
+    </el-table>
+    <el-empty v-else :description="competitionsRequest.loading ? '加载中' : '暂无竞赛数据'" />
+    <el-alert
+      v-if="competitionsRequest.error"
+      style="margin-top: 12px"
+      type="error"
+      show-icon
+      :title="competitionsRequest.error"
+      :closable="false"
+    />
+  </el-card>
 
   <div class="card-grid">
     <el-card v-for="methodItem in methods" :key="methodItem.id" class="card">

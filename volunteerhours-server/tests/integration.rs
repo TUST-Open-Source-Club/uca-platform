@@ -116,10 +116,10 @@ async fn reset_database(state: &AppState) {
                     .db
                     .execute(sea_orm::Statement::from_string(
                         backend,
-                        format!("TRUNCATE TABLE {table}"),
+                        format!("DELETE FROM {table}"),
                     ))
                     .await
-                    .expect("truncate");
+                    .expect("delete");
             }
             state
                 .db

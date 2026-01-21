@@ -8,6 +8,7 @@ import RecordsView from '../views/RecordsView.vue'
 import ReviewDashboard from '../views/ReviewDashboard.vue'
 import StudentDashboard from '../views/StudentDashboard.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,6 +23,17 @@ const router = createRouter({
     { path: '/exports', component: ExportView },
     { path: '/devices', component: DevicesView },
   ],
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  const publicRoutes = ['/login', '/2fa']
+  if (publicRoutes.includes(to.path)) return true
+  await auth.ensureSession()
+  if (!auth.loggedIn) return '/login'
+  if (to.path === '/admin' && auth.role !== 'admin') return auth.homePath()
+  if (to.path === '/review' && auth.role === 'student') return auth.homePath()
+  return true
 })
 
 export default router

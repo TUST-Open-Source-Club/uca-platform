@@ -6,6 +6,7 @@ use crate::state::AppState;
 
 pub mod auth;
 pub mod attachments;
+pub mod admin;
 pub mod exports;
 pub mod students;
 pub mod records;
@@ -19,6 +20,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/passkey/register/finish", post(auth::passkey_register_finish))
         .route("/auth/passkey/login/start", post(auth::passkey_login_start))
         .route("/auth/passkey/login/finish", post(auth::passkey_login_finish))
+        .route("/auth/me", get(auth::current_user))
         .route("/auth/totp/enroll/start", post(auth::totp_enroll_start))
         .route("/auth/totp/enroll/finish", post(auth::totp_enroll_finish))
         .route("/auth/totp/verify", post(auth::totp_verify))
@@ -41,5 +43,9 @@ pub fn router(state: AppState) -> Router {
         .route("/export/summary/excel", post(exports::export_summary_excel))
         .route("/export/student/:student_no/excel", post(exports::export_student_excel))
         .route("/export/record/:record_type/:record_id/pdf", post(exports::export_record_pdf))
+        .route("/admin/competitions", get(admin::list_competitions))
+        .route("/admin/competitions", post(admin::create_competition))
+        .route("/admin/form-fields", get(admin::list_form_fields))
+        .route("/admin/form-fields", post(admin::create_form_field))
         .with_state(state)
 }

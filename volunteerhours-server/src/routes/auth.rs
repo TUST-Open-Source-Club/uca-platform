@@ -41,6 +41,33 @@ pub async fn health() -> Json<HealthResponse> {
     })
 }
 
+/// 当前登录用户信息响应。
+#[derive(Debug, Serialize)]
+pub struct CurrentUserResponse {
+    /// 用户 ID。
+    pub id: Uuid,
+    /// 用户名。
+    pub username: String,
+    /// 展示名。
+    pub display_name: String,
+    /// 角色。
+    pub role: String,
+}
+
+/// 获取当前会话的用户信息。
+pub async fn current_user(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<CurrentUserResponse>, AppError> {
+    let user = require_session(&state, &jar).await?;
+    Ok(Json(CurrentUserResponse {
+        id: user.id,
+        username: user.username,
+        display_name: user.display_name,
+        role: user.role,
+    }))
+}
+
 /// 引导创建管理员的请求体。
 #[derive(Debug, Deserialize)]
 pub struct BootstrapRequest {

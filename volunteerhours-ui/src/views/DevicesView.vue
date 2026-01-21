@@ -1,4 +1,33 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { ref } from 'vue'
+import { listDevices, regenerateRecoveryCodes } from '../api/auth'
+import { useRequest } from '../composables/useRequest'
+
+const devices = ref('')
+const codes = ref('')
+const devicesRequest = useRequest()
+const codesRequest = useRequest()
+
+const handleLoad = async () => {
+  await devicesRequest.run(
+    async () => {
+      const data = await listDevices()
+      devices.value = JSON.stringify(data, null, 2)
+    },
+    { successMessage: '已刷新设备列表' },
+  )
+}
+
+const handleRegenerate = async () => {
+  await codesRequest.run(
+    async () => {
+      const data = await regenerateRecoveryCodes()
+      codes.value = data.codes.join('\n')
+    },
+    { successMessage: '恢复码已生成' },
+  )
+}
+</script>
 
 <template>
   <section class="hero">
@@ -7,15 +36,27 @@
   </section>
 
   <div class="card-grid">
-    <article class="card">
+    <el-card class="card">
       <h3>已绑定设备</h3>
-      <p>当前设备列表为空。</p>
-      <button class="button secondary">刷新列表</button>
-    </article>
-    <article class="card">
+      <el-button :loading="devicesRequest.loading" @click="handleLoad">刷新列表</el-button>
+      <pre v-if="devices">{{ devices }}</pre>
+    </el-card>
+    <el-card class="card">
       <h3>恢复码</h3>
-      <p>请妥善保存最新恢复码。</p>
-      <button class="button">生成恢复码</button>
-    </article>
+      <el-button type="primary" :loading="codesRequest.loading" @click="handleRegenerate">
+        生成恢复码
+      </el-button>
+      <pre v-if="codes">{{ codes }}</pre>
+    </el-card>
   </div>
+
+  <el-alert
+    v-if="devicesRequest.error || codesRequest.error"
+    class="card"
+    style="margin-top: 24px"
+    type="error"
+    show-icon
+    :title="devicesRequest.error || codesRequest.error"
+    :closable="false"
+  />
 </template>

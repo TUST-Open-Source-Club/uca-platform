@@ -123,6 +123,19 @@ Response:
 { "user_id": "<uuid>" }
 ```
 
+### GET /auth/me
+Return current session user profile.
+
+Response:
+```json
+{
+  "id": "<uuid>",
+  "username": "20231234",
+  "display_name": "张三",
+  "role": "student"
+}
+```
+
 ### POST /auth/totp/enroll/start
 Start TOTP enrollment for the current user (requires session cookie).
 
@@ -431,3 +444,34 @@ Request:
 
 ### POST /export/record/{record_type}/{record_id}/pdf
 导出单条记录 PDF。
+
+## 管理接口
+
+### GET /admin/competitions
+获取竞赛名称库（管理员）。
+
+### POST /admin/competitions
+新增竞赛名称（管理员）。
+
+Request:
+```json
+{ "name": "全国大学生数学建模竞赛" }
+```
+
+### GET /admin/form-fields
+获取表单字段配置（管理员）。
+
+### POST /admin/form-fields
+新增表单字段（管理员）。
+
+Request:
+```json
+{
+  "form_type": "volunteer",
+  "field_key": "location",
+  "label": "地点",
+  "field_type": "text",
+  "required": true,
+  "order_index": 1
+}
+```

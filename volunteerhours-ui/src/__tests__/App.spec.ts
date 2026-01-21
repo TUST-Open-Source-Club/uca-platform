@@ -1,11 +1,22 @@
 import { describe, it, expect } from 'vitest'
-
 import { mount } from '@vue/test-utils'
 import App from '../App.vue'
 
 describe('App', () => {
-  it('mounts renders properly', () => {
-    const wrapper = mount(App)
-    expect(wrapper.text()).toContain('You did it!')
+  it('renders brand', () => {
+    const wrapper = mount(App, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          RouterView: { template: '<div />' },
+          'el-container': { template: '<div><slot /></div>' },
+          'el-main': { template: '<main><slot /></main>' },
+          'el-aside': { template: '<aside><slot /></aside>' },
+          'el-menu': { template: '<nav><slot /></nav>' },
+          'el-menu-item': { template: '<div><slot /></div>' },
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('VolunteerHours')
   })
 })

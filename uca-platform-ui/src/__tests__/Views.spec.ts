@@ -10,6 +10,7 @@ import ExportView from '../views/ExportView.vue'
 import DevicesView from '../views/DevicesView.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
 import PurgeView from '../views/PurgeView.vue'
+import PublicCompetitionsView from '../views/PublicCompetitionsView.vue'
 
 vi.mock('../api/forms', () => ({
   listFormFieldsByType: vi.fn().mockResolvedValue([
@@ -86,6 +87,7 @@ const stubs = {
   'el-upload': { template: '<div><slot /></div>' },
   'el-table': { template: '<table><slot /></table>' },
   'el-table-column': { template: '<col />' },
+  'el-empty': { template: '<div />' },
 }
 
 describe('Views', () => {
@@ -129,6 +131,11 @@ describe('Views', () => {
   it('renders purge view', () => {
     const wrapper = mount(PurgeView, { global: { stubs } })
     expect(wrapper.text()).toContain('彻底删除')
+  })
+
+  it('renders public competitions view', () => {
+    const wrapper = mount(PublicCompetitionsView, { global: { stubs } })
+    expect(wrapper.text()).toContain('竞赛清单')
   })
 
   it('renders two factor view', async () => {

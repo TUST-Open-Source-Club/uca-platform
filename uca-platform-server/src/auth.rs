@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn totp_round_trip() {
-        let (secret, _) = generate_totp("VolunteerHours", "user@example.com").expect("totp");
+        let (secret, _) = generate_totp("UCA Platform", "user@example.com").expect("totp");
         let totp = TOTP::new(
             Algorithm::SHA1,
             6,

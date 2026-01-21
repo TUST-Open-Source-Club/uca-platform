@@ -463,7 +463,7 @@ pub async fn totp_enroll_start(
 ) -> Result<Json<TotpEnrollStartResponse>, AppError> {
     let user = require_session(&state, &jar).await?;
 
-    let (secret, url) = generate_totp("VolunteerHours", &user.username)?;
+    let (secret, url) = generate_totp("UCA Platform", &user.username)?;
     let encrypted = encrypt_secret(&secret, &state.config.auth_secret_key)?;
 
     let now = Utc::now();

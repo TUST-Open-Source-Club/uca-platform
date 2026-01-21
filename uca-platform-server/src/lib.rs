@@ -1,4 +1,4 @@
-//! VolunteerHours 服务端库入口。
+//! UCA Platform 服务端库入口。
 
 pub mod auth;
 pub mod access;

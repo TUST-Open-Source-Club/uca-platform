@@ -1,4 +1,4 @@
-//! VolunteerHours 服务端配置加载。
+//! UCA Platform 服务端配置加载。
 
 use std::env;
 use std::path::PathBuf;

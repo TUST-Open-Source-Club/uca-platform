@@ -109,12 +109,13 @@ const handleLogin = async () => {
 
 <template>
   <section class="hero">
-    <h1>欢迎进入志愿时长与竞赛统计平台</h1>
+    <h1>欢迎进入综测管理平台</h1>
     <p>请使用 Passkey 或 TOTP 完成认证。系统不支持纯密码登录。</p>
   </section>
 
   <el-card class="card" style="margin-top: 16px">
     <h3>竞赛清单（仅查询）</h3>
+    
     <el-table v-if="competitions.length" :data="competitions">
       <el-table-column prop="name" label="竞赛名称" />
     </el-table>

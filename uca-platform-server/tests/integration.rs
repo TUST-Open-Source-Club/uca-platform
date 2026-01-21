@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use tower::util::ServiceExt;
 use url::Url;
 use uuid::Uuid;
-use volunteerhours::{
+use ucaplatform::{
     auth::{encrypt_secret, generate_recovery_codes, generate_session_token, generate_totp, hash_session_token},
     config::Config,
     entities::{
@@ -52,7 +52,7 @@ async fn setup_context() -> TestContext {
     };
 
     let mut builder = WebauthnBuilder::new(&config.rp_id, &config.rp_origin).unwrap();
-    builder = builder.rp_name("VolunteerHours");
+    builder = builder.rp_name("UCA Platform");
     let webauthn = builder.build().unwrap();
 
     let state = AppState::new(Arc::new(config), db, webauthn).unwrap();
@@ -421,7 +421,7 @@ async fn create_and_review_records() {
 
     let now = chrono::Utc::now();
     let field_id = Uuid::new_v4();
-    let field_model = volunteerhours::entities::form_fields::ActiveModel {
+    let field_model = ucaplatform::entities::form_fields::ActiveModel {
         id: Set(field_id),
         form_type: Set("volunteer".to_string()),
         field_key: Set("location".to_string()),
@@ -432,7 +432,7 @@ async fn create_and_review_records() {
         created_at: Set(now),
         updated_at: Set(now),
     };
-    volunteerhours::entities::form_fields::Entity::insert(field_model)
+    ucaplatform::entities::form_fields::Entity::insert(field_model)
         .exec_without_returning(&ctx.state.db)
         .await
         .unwrap();
@@ -472,7 +472,7 @@ async fn create_and_review_records() {
     let reviewer = create_user(&ctx.state, "reviewer1", "reviewer").await;
     let reviewer_cookie = create_session_cookie(&ctx.state, reviewer.id).await;
 
-    let volunteer_record = volunteerhours::entities::VolunteerRecord::find()
+    let volunteer_record = ucaplatform::entities::VolunteerRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -525,7 +525,7 @@ async fn export_endpoints() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = volunteerhours::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::VolunteerRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -558,7 +558,7 @@ async fn upload_attachments_and_signatures() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = volunteerhours::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::VolunteerRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -606,7 +606,7 @@ async fn delete_student_and_records() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = volunteerhours::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::VolunteerRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -666,7 +666,7 @@ async fn purge_deleted_student_and_record() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = volunteerhours::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::VolunteerRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -737,7 +737,7 @@ async fn auth_totp_and_recovery() {
     reset_database(&ctx.state).await;
     let user = create_user(&ctx.state, "2023999", "student").await;
 
-    let (secret, _) = generate_totp("VolunteerHours", &user.username).unwrap();
+    let (secret, _) = generate_totp("UCA Platform", &user.username).unwrap();
     let encrypted = encrypt_secret(&secret, &ctx.state.config.auth_secret_key).unwrap();
     let totp_id = Uuid::new_v4();
     let totp_model = totp_secrets::ActiveModel {
@@ -760,7 +760,7 @@ async fn auth_totp_and_recovery() {
         30,
         secret.clone(),
         Some(user.username.clone()),
-        "VolunteerHours".to_string(),
+        "UCA Platform".to_string(),
     )
     .generate_current()
     .unwrap();

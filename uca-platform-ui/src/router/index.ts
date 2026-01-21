@@ -9,6 +9,7 @@ import ReviewDashboard from '../views/ReviewDashboard.vue'
 import StudentDashboard from '../views/StudentDashboard.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
 import PurgeView from '../views/PurgeView.vue'
+import PublicCompetitionsView from '../views/PublicCompetitionsView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/', redirect: '/login' },
     { path: '/login', component: LoginView },
     { path: '/2fa', component: TwoFactorView },
+    { path: '/competitions', component: PublicCompetitionsView },
     { path: '/student', component: StudentDashboard },
     { path: '/records', component: RecordsView },
     { path: '/review', component: ReviewDashboard },
@@ -29,7 +31,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  const publicRoutes = ['/login', '/2fa']
+  const publicRoutes = ['/login', '/2fa', '/competitions']
   if (publicRoutes.includes(to.path)) return true
   await auth.ensureSession()
   if (!auth.loggedIn) return '/login'

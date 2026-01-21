@@ -3822,6 +3822,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
+name = "ucaplatform"
+version = "0.1.0"
+dependencies = [
+ "aead",
+ "aes-gcm",
+ "argon2",
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "axum-server",
+ "base64 0.22.1",
+ "calamine",
+ "chrono",
+ "hex",
+ "hyper",
+ "image",
+ "mime_guess",
+ "printpdf",
+ "rand 0.8.5",
+ "rcgen",
+ "rust_xlsxwriter",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "totp-rs",
+ "tower 0.4.13",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "validator",
+ "webauthn-rs",
+]
+
+[[package]]
 name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3966,48 +4008,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "volunteerhours"
-version = "0.1.0"
-dependencies = [
- "aead",
- "aes-gcm",
- "argon2",
- "async-trait",
- "axum",
- "axum-extra",
- "axum-server",
- "base64 0.22.1",
- "calamine",
- "chrono",
- "hex",
- "hyper",
- "image",
- "mime_guess",
- "printpdf",
- "rand 0.8.5",
- "rcgen",
- "rust_xlsxwriter",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "totp-rs",
- "tower 0.4.13",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
- "validator",
- "webauthn-rs",
-]
 
 [[package]]
 name = "wasi"

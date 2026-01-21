@@ -3,7 +3,7 @@
 <template>
   <el-container class="app-shell">
     <el-aside class="sidebar" width="260px">
-      <div class="brand">VolunteerHours</div>
+      <div class="brand">UCA Platform</div>
       <el-menu router class="nav" background-color="transparent" text-color="#1f4d63">
         <el-menu-item index="/login">登录</el-menu-item>
         <el-menu-item index="/student">学生中心</el-menu-item>

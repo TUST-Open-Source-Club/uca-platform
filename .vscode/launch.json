@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "UCA Server (debug)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["run"],
+        "cwd": "${workspaceFolder}/uca-platform-server"
+      },
+      "env": {
+        "DEVELOPER_MODE": "true",
+        "ALLOW_HTTP": "true",
+        "RUST_LOG": "info"
+      }
+    }
+  ]
+}

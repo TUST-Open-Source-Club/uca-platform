@@ -1,0 +1,46 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "server: run",
+      "type": "shell",
+      "command": "cargo run",
+      "options": {
+        "cwd": "${workspaceFolder}/uca-platform-server"
+      },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "server: test",
+      "type": "shell",
+      "command": "cargo test",
+      "options": {
+        "cwd": "${workspaceFolder}/uca-platform-server"
+      },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "ui: dev",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": {
+        "cwd": "${workspaceFolder}/uca-platform-ui"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "ui: test",
+      "type": "shell",
+      "command": "pnpm test:unit",
+      "options": {
+        "cwd": "${workspaceFolder}/uca-platform-ui"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: all",
+      "dependsOn": ["server: run", "ui: dev"],
+      "dependsOrder": "parallel"
+    }
+  ]
+}

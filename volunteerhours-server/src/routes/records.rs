@@ -3,9 +3,7 @@
 use axum::{extract::State, Json, extract::Path};
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -176,11 +174,12 @@ pub async fn create_volunteer_record(
     validate_custom_fields(&form_fields, &custom_fields)?;
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
     let model = volunteer_records::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(id),
         student_id: Set(student.id),
-        title: Set(payload.title),
-        description: Set(payload.description),
+        title: Set(payload.title.clone()),
+        description: Set(payload.description.clone()),
         self_hours: Set(payload.self_hours),
         first_review_hours: Set(None),
         final_review_hours: Set(None),
@@ -188,15 +187,29 @@ pub async fn create_volunteer_record(
         rejection_reason: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    volunteer_records::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
-    let model_id = model.id;
+    let model_id = id;
     insert_custom_fields(&state, "volunteer", model_id, &form_fields, &custom_fields).await?;
 
     let custom_values = fetch_custom_fields(&state, "volunteer", &[model_id], &form_fields).await?;
+    let model = volunteer_records::Model {
+        id,
+        student_id: student.id,
+        title: payload.title,
+        description: payload.description,
+        self_hours: payload.self_hours,
+        first_review_hours: None,
+        final_review_hours: None,
+        status: STATUS_SUBMITTED.to_string(),
+        rejection_reason: None,
+        created_at: now,
+        updated_at: now,
+    };
     Ok(Json(model_to_volunteer_response(
         model,
         custom_values.get(&model_id).cloned().unwrap_or_default(),
@@ -227,11 +240,12 @@ pub async fn create_contest_record(
     validate_custom_fields(&form_fields, &custom_fields)?;
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
     let model = contest_records::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(id),
         student_id: Set(student.id),
-        contest_name: Set(payload.contest_name),
-        award_level: Set(payload.award_level),
+        contest_name: Set(payload.contest_name.clone()),
+        award_level: Set(payload.award_level.clone()),
         self_hours: Set(payload.self_hours),
         first_review_hours: Set(None),
         final_review_hours: Set(None),
@@ -239,15 +253,29 @@ pub async fn create_contest_record(
         rejection_reason: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    contest_records::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
-    let match_status = contest_match_status(&state, &model.contest_name).await?;
-    let model_id = model.id;
+    let match_status = contest_match_status(&state, &payload.contest_name).await?;
+    let model_id = id;
     insert_custom_fields(&state, "contest", model_id, &form_fields, &custom_fields).await?;
     let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
+    let model = contest_records::Model {
+        id,
+        student_id: student.id,
+        contest_name: payload.contest_name,
+        award_level: payload.award_level,
+        self_hours: payload.self_hours,
+        first_review_hours: None,
+        final_review_hours: None,
+        status: STATUS_SUBMITTED.to_string(),
+        rejection_reason: None,
+        created_at: now,
+        updated_at: now,
+    };
     Ok(Json(model_to_contest_response(
         model,
         &match_status,
@@ -571,17 +599,18 @@ async fn insert_custom_fields(
             continue;
         }
         if let Some(field) = field_map.get(key.as_str()) {
-            form_field_values::ActiveModel {
+            let value_model = form_field_values::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 record_type: Set(record_type.to_string()),
                 record_id: Set(record_id),
                 field_key: Set(field.field_key.clone()),
                 value: Set(value.to_string()),
                 created_at: Set(Utc::now()),
-            }
-            .insert(&state.db)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
+            };
+            form_field_values::Entity::insert(value_model)
+                .exec_without_returning(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
         }
     }
 
@@ -638,6 +667,7 @@ async fn fetch_custom_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     #[test]
     fn apply_review_update_rejects() {
@@ -667,5 +697,97 @@ mod tests {
         apply_review_update(&payload, &mut status, &mut reason).expect("apply");
         assert_eq!(status.unwrap(), STATUS_FIRST_REVIEWED.to_string());
         assert_eq!(reason.unwrap(), None);
+    }
+
+    #[test]
+    fn ensure_review_permission_allows_expected_roles() {
+        let user = crate::entities::users::Model {
+            id: Uuid::new_v4(),
+            username: "u1".to_string(),
+            display_name: "u1".to_string(),
+            role: "reviewer".to_string(),
+            is_active: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        ensure_review_permission(&user, REVIEW_STAGE_FIRST).expect("reviewer allowed");
+        assert!(ensure_review_permission(&user, REVIEW_STAGE_FINAL).is_err());
+    }
+
+    #[test]
+    fn validate_custom_fields_rejects_missing_required_and_unknown() {
+        let fields = vec![
+            form_fields::Model {
+                id: Uuid::new_v4(),
+                form_type: "volunteer".to_string(),
+                field_key: "location".to_string(),
+                label: "地点".to_string(),
+                field_type: "text".to_string(),
+                required: true,
+                order_index: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            form_fields::Model {
+                id: Uuid::new_v4(),
+                form_type: "volunteer".to_string(),
+                field_key: "note".to_string(),
+                label: "备注".to_string(),
+                field_type: "text".to_string(),
+                required: false,
+                order_index: 2,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ];
+
+        let empty_payload = HashMap::new();
+        assert!(validate_custom_fields(&fields, &empty_payload).is_err());
+
+        let mut unknown_payload = HashMap::new();
+        unknown_payload.insert("unknown".to_string(), "value".to_string());
+        assert!(validate_custom_fields(&fields, &unknown_payload).is_err());
+
+        let mut ok_payload = HashMap::new();
+        ok_payload.insert("location".to_string(), "校内".to_string());
+        assert!(validate_custom_fields(&fields, &ok_payload).is_ok());
+    }
+
+    #[test]
+    fn model_to_response_copies_fields() {
+        let model = volunteer_records::Model {
+            id: Uuid::new_v4(),
+            student_id: Uuid::new_v4(),
+            title: "标题".to_string(),
+            description: "描述".to_string(),
+            self_hours: 2,
+            first_review_hours: None,
+            final_review_hours: None,
+            status: STATUS_SUBMITTED.to_string(),
+            rejection_reason: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let response = model_to_volunteer_response(model.clone(), Vec::new());
+        assert_eq!(response.id, model.id);
+        assert_eq!(response.title, "标题");
+        assert_eq!(response.status, STATUS_SUBMITTED);
+
+        let contest = contest_records::Model {
+            id: Uuid::new_v4(),
+            student_id: model.student_id,
+            contest_name: "竞赛".to_string(),
+            award_level: "一等奖".to_string(),
+            self_hours: 3,
+            first_review_hours: None,
+            final_review_hours: None,
+            status: STATUS_SUBMITTED.to_string(),
+            rejection_reason: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let contest_resp = model_to_contest_response(contest, "matched", Vec::new());
+        assert_eq!(contest_resp.match_status, "matched");
+        assert_eq!(contest_resp.contest_name, "竞赛");
     }
 }

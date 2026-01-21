@@ -7,7 +7,7 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::Engine;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, ActiveModelTrait, PaginatorTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 use chrono::{Duration as ChronoDuration, Utc};
 use time::{Duration as TimeDuration, OffsetDateTime};
@@ -114,7 +114,8 @@ pub async fn bootstrap_admin(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    user.insert(&state.db)
+    users::Entity::insert(user)
+        .exec_without_returning(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
@@ -246,19 +247,20 @@ pub async fn passkey_register_finish(
     let passkey_json = serde_json::to_string(&passkey)
         .map_err(|_| AppError::internal("failed to serialize passkey"))?;
 
-    passkeys::ActiveModel {
+    let passkey_model = passkeys::ActiveModel {
         id: Set(passkey_id),
         user_id: Set(session.user_id),
         credential_id: Set(cred_id_b64.clone()),
         passkey_json: Set(passkey_json),
         created_at: Set(now),
         last_used_at: Set(None),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    passkeys::Entity::insert(passkey_model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
-    devices::ActiveModel {
+    let device_model = devices::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(session.user_id),
         device_type: Set("passkey".to_string()),
@@ -268,10 +270,11 @@ pub async fn passkey_register_finish(
         credential_id: Set(Some(cred_id_b64)),
         created_at: Set(now),
         last_used_at: Set(None),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    devices::Entity::insert(device_model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(PasskeyRegisterFinishResponse { passkey_id }))
 }
@@ -425,8 +428,8 @@ pub async fn passkey_login_finish(
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
     } else {
-        device
-            .insert(&state.db)
+        devices::Entity::insert(device)
+            .exec_without_returning(&state.db)
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
     }
@@ -466,20 +469,21 @@ pub async fn totp_enroll_start(
     let now = Utc::now();
     let enrollment_id = Uuid::new_v4();
 
-    totp_secrets::ActiveModel {
+    let totp_model = totp_secrets::ActiveModel {
         id: Set(enrollment_id),
         user_id: Set(user.id),
         secret_enc: Set(encrypted),
         enabled: Set(false),
         created_at: Set(now),
         verified_at: Set(None),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    totp_secrets::Entity::insert(totp_model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     if let Some(label) = payload.device_label {
-        devices::ActiveModel {
+        let device_model = devices::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
             device_type: Set("totp".to_string()),
@@ -487,10 +491,11 @@ pub async fn totp_enroll_start(
             credential_id: Set(None),
             created_at: Set(now),
             last_used_at: Set(None),
-        }
-        .insert(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+        };
+        devices::Entity::insert(device_model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
     }
 
     Ok(Json(TotpEnrollStartResponse {
@@ -642,16 +647,17 @@ pub async fn recovery_regenerate(
     let codes = generate_recovery_codes(8)?;
     let now = Utc::now();
     for code in &codes {
-        recovery_codes::ActiveModel {
+        let recovery_model = recovery_codes::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
             code_hash: Set(code.hash.clone()),
             used_at: Set(None),
             created_at: Set(now),
-        }
-        .insert(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+        };
+        recovery_codes::Entity::insert(recovery_model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
     }
 
     Ok(Json(serde_json::json!({
@@ -701,17 +707,18 @@ async fn create_session_cookie(
     let expires_cookie = OffsetDateTime::now_utc()
         + TimeDuration::seconds(state.config.session_ttl_seconds);
 
-    sessions::ActiveModel {
+    let session_model = sessions::ActiveModel {
         id: Set(Uuid::new_v4()),
         user_id: Set(user_id),
         token_hash: Set(token_hash),
         expires_at: Set(expires_db),
         created_at: Set(now_db),
         last_seen_at: Set(Some(now_db)),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    sessions::Entity::insert(session_model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     let cookie = Cookie::build((state.config.session_cookie_name.clone(), token))
         .http_only(true)

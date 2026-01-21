@@ -650,3 +650,82 @@ fn draw_line(layer: &printpdf::PdfLayerReference, x1: f32, y1: f32, x2: f32, y2:
     };
     layer.add_line(line);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn build_student() -> students::Model {
+        students::Model {
+            id: Uuid::new_v4(),
+            student_no: "2023001".to_string(),
+            name: "张三".to_string(),
+            gender: "男".to_string(),
+            department: "信息学院".to_string(),
+            major: "软件工程".to_string(),
+            class_name: "软工1班".to_string(),
+            phone: "13800000000".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn wrap_text_handles_empty() {
+        let lines = wrap_text("", 4);
+        assert_eq!(lines, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn wrap_text_splits_by_max_chars() {
+        let lines = wrap_text("abcdef", 2);
+        assert_eq!(lines, vec!["ab", "cd", "ef"]);
+    }
+
+    #[test]
+    fn resolve_export_value_maps_fields() {
+        let student = build_student();
+        let value = resolve_export_value("student_no", &student, 3, 2, "原因");
+        match value {
+            ExportValue::Text(text) => assert_eq!(text, "2023001"),
+            _ => panic!("unexpected value"),
+        }
+
+        let value = resolve_export_value("approved_hours", &student, 3, 2, "原因");
+        match value {
+            ExportValue::Number(num) => assert_eq!(num, 2.0),
+            _ => panic!("unexpected value"),
+        }
+
+        let value = resolve_export_value("reason", &student, 3, 2, "原因");
+        match value {
+            ExportValue::Text(text) => assert_eq!(text, "原因"),
+            _ => panic!("unexpected value"),
+        }
+
+        let value = resolve_export_value("unknown", &student, 3, 2, "原因");
+        match value {
+            ExportValue::Text(text) => assert!(text.is_empty()),
+            _ => panic!("unexpected value"),
+        }
+    }
+
+    #[test]
+    fn default_fields_are_ordered() {
+        let summary = default_summary_fields();
+        assert!(summary.windows(2).all(|pair| pair[0].order_index < pair[1].order_index));
+        let student = default_student_fields();
+        assert!(student.windows(2).all(|pair| pair[0].order_index < pair[1].order_index));
+    }
+
+    #[test]
+    fn write_cell_accepts_text_and_number() {
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        let worksheet = workbook.add_worksheet();
+        write_cell(worksheet, 0, 0, &ExportValue::Text("测试".to_string()))
+            .expect("write text");
+        write_cell(worksheet, 1, 0, &ExportValue::Number(3.0))
+            .expect("write number");
+    }
+}

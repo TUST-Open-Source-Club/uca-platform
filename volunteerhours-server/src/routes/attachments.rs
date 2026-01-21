@@ -3,7 +3,7 @@
 use axum::{extract::{Path, State, Multipart}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::Serialize;
 use std::path::{Path as StdPath, PathBuf};
 use tokio::fs;
@@ -106,22 +106,24 @@ pub async fn upload_review_signature(
     let dir = build_upload_dir(&state.config.upload_dir, "signatures", &record_type, Some(&stage));
     let path = save_bytes(&dir, &stored_name, &bytes).await?;
 
+    let id = Uuid::new_v4();
     let model = review_signatures::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(id),
         record_type: Set(record_type),
         record_id: Set(record_id),
         reviewer_user_id: Set(user.id),
         stage: Set(stage),
         signature_path: Set(path.to_string_lossy().to_string()),
         created_at: Set(Utc::now()),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    review_signatures::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(SignatureResponse {
-        id: model.id,
-        signature_path: model.signature_path,
+        id,
+        signature_path: path.to_string_lossy().to_string(),
     }))
 }
 
@@ -156,8 +158,9 @@ async fn upload_record_attachment(
     let dir = build_upload_dir(&state.config.upload_dir, "attachments", record_type, None);
     let path = save_bytes(&dir, &stored_name, &bytes).await?;
 
+    let id = Uuid::new_v4();
     let model = attachments::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(id),
         student_id: Set(student.id),
         record_type: Set(record_type.to_string()),
         record_id: Set(record_id),
@@ -165,14 +168,15 @@ async fn upload_record_attachment(
         stored_name: Set(path.to_string_lossy().to_string()),
         mime_type: Set(mime_type),
         created_at: Set(Utc::now()),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    attachments::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(AttachmentResponse {
-        id: model.id,
-        stored_name: model.stored_name,
+        id,
+        stored_name: path.to_string_lossy().to_string(),
     }))
 }
 
@@ -317,5 +321,34 @@ mod tests {
     fn sanitize_component_replaces_separators() {
         let value = sanitize_component("a/b\\c");
         assert_eq!(value, "a_b_c");
+    }
+
+    #[test]
+    fn build_stored_name_sanitizes_and_preserves_extension() {
+        let name = build_stored_name("2023/01", "张/三", "volunteer:", "proof.pdf");
+        assert!(name.contains("2023_01"));
+        assert!(name.contains("张_三"));
+        assert!(name.contains("volunteer_"));
+        assert!(name.ends_with(".pdf"));
+    }
+
+    #[test]
+    fn build_stored_name_falls_back_to_bin() {
+        let name = build_stored_name("2023", "张三", "volunteer", "proof");
+        assert!(name.ends_with(".bin"));
+    }
+
+    #[test]
+    fn build_upload_dir_appends_stage() {
+        let base = PathBuf::from("data/uploads");
+        let dir = build_upload_dir(&base, "signatures", "volunteer", Some("first"));
+        assert!(dir.ends_with("data/uploads/signatures/volunteer/first"));
+    }
+
+    #[test]
+    fn ensure_review_permission_allows_expected_roles() {
+        assert!(ensure_review_permission("reviewer", "first").is_ok());
+        assert!(ensure_review_permission("teacher", "final").is_ok());
+        assert!(ensure_review_permission("student", "first").is_err());
     }
 }

@@ -43,22 +43,22 @@
 ## Rollback
 - 使用 git 回退本次修改文件。
 
-## Current Task: 全面测试覆盖 + CI
-阶段 1：测试基础设施
-- 后端：建立 `tests/` 集成测试基础（SQLite 本地），封装测试 App、迁移、种子数据。
-- 前端：为所有视图补齐单测基线（渲染、基础交互、路由守卫、错误状态）。
-- CI：添加 GitHub Actions，矩阵运行后端/前端测试；后端使用 MySQL/PostgreSQL 服务。
-
-阶段 2：后端单元测试扩展
+## Current Task: 全面测试覆盖 + CI（按 1→2→3 顺序）
+阶段 1：后端单元测试扩展（优先完成）
 - 为各模块内部函数补齐测试（auth/tls/records/students/attachments/exports/admin/forms 等）。
 - 覆盖成功/失败/边界条件、权限控制、输入校验。
+- 进度：已补齐 exports/admin/records/attachments/students 的纯函数与权限/校验测试（forms 仍缺少可测的纯函数）。
 
-阶段 3：后端集成测试
+阶段 2：前端集成测试
+- 路由权限、登录流程（Passkey/TOTP stub）、表单校验与错误提示、导入/导出交互。
+- 维持已有视图单测，补齐关键交互与错误提示断言。
+ - 进度：已补齐登录流程（Passkey/TOTP/恢复码）与路由守卫的集成测试。
+
+阶段 3：CI 与后端集成测试强化
 - 覆盖完整流程：管理员引导/登录、TOTP/Passkey、学生导入、记录提交、审核、导出、附件上传。
 - SQLite 本地跑；CI 以 MySQL/PostgreSQL 运行同样的集成测试。
-
-阶段 4：前端集成测试
-- 路由权限、登录流程（Passkey/TOTP stub）、表单校验与错误提示、导入/导出交互。
+- GitHub Actions 矩阵运行后端/前端测试。
+ - 进度：已补齐附件上传与签名上传的集成测试。
 
 ## Verification
 - Frontend: `pnpm test:unit`

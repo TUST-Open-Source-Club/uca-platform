@@ -533,6 +533,51 @@ async fn export_endpoints() {
 }
 
 #[tokio::test]
+async fn upload_attachments_and_signatures() {
+    let ctx = setup_context().await;
+    reset_database(&ctx.state).await;
+
+    let student_user = create_user(&ctx.state, "2023010", "student").await;
+    create_student(&ctx.state, "2023010").await;
+    let student_cookie = create_session_cookie(&ctx.state, student_user.id).await;
+
+    let request = json_request(
+        "POST",
+        "/records/volunteer",
+        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+    )
+    .with_cookie(&student_cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let record = volunteerhours::entities::VolunteerRecord::find()
+        .one(&ctx.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let attachment = multipart_request(
+        &format!("/attachments/volunteer/{}", record.id),
+        "proof.txt",
+        b"test".to_vec(),
+    )
+    .with_cookie(&student_cookie);
+    let response = ctx.app.clone().oneshot(attachment).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let reviewer = create_user(&ctx.state, "reviewer2", "reviewer").await;
+    let reviewer_cookie = create_session_cookie(&ctx.state, reviewer.id).await;
+    let signature = multipart_request(
+        &format!("/signatures/volunteer/{}/first", record.id),
+        "sig.png",
+        b"sig".to_vec(),
+    )
+    .with_cookie(&reviewer_cookie);
+    let response = ctx.app.clone().oneshot(signature).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn auth_totp_and_recovery() {
     let ctx = setup_context().await;
     reset_database(&ctx.state).await;

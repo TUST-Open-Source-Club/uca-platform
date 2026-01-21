@@ -4,9 +4,7 @@ use axum::{extract::{State, Multipart}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use uuid::Uuid;
@@ -106,23 +104,37 @@ pub async fn create_student(
     }
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
     let model = students::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        student_no: Set(payload.student_no),
-        name: Set(payload.name),
-        gender: Set(payload.gender),
-        department: Set(payload.department),
-        major: Set(payload.major),
-        class_name: Set(payload.class_name),
-        phone: Set(payload.phone),
+        id: Set(id),
+        student_no: Set(payload.student_no.clone()),
+        name: Set(payload.name.clone()),
+        gender: Set(payload.gender.clone()),
+        department: Set(payload.department.clone()),
+        major: Set(payload.major.clone()),
+        class_name: Set(payload.class_name.clone()),
+        phone: Set(payload.phone.clone()),
         created_at: Set(now),
         updated_at: Set(now),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    students::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(model.into()))
+    let model = students::Model {
+        id,
+        student_no: payload.student_no,
+        name: payload.name,
+        gender: payload.gender,
+        department: payload.department,
+        major: payload.major,
+        class_name: payload.class_name,
+        phone: payload.phone,
+        created_at: now,
+        updated_at: now,
+    };
+    Ok(Json(StudentResponse::from(model)))
 }
 
 /// 学生筛选查询。
@@ -271,7 +283,7 @@ pub async fn import_students(
                 .map_err(|err| AppError::Database(err.to_string()))?;
             updated += 1;
         } else {
-            students::ActiveModel {
+            let model = students::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 student_no: Set(student_no),
                 name: Set(name),
@@ -282,10 +294,11 @@ pub async fn import_students(
                 phone: Set(phone),
                 created_at: Set(now),
                 updated_at: Set(now),
-            }
-            .insert(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
+            };
+            students::Entity::insert(model)
+                .exec_without_returning(&transaction)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
             inserted += 1;
         }
     }
@@ -321,5 +334,12 @@ mod tests {
         index.insert("学号".to_string(), 0);
         let row = vec![Data::String(" 2023001 ".to_string())];
         assert_eq!(read_cell(&index, "学号", &row), "2023001");
+    }
+
+    #[test]
+    fn read_cell_returns_empty_on_missing_header() {
+        let index = std::collections::HashMap::new();
+        let row = vec![Data::String(" 2023001 ".to_string())];
+        assert_eq!(read_cell(&index, "学号", &row), "");
     }
 }

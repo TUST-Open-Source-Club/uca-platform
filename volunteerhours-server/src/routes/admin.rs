@@ -4,7 +4,7 @@ use axum::{extract::{State, Multipart}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -121,17 +121,20 @@ pub async fn create_competition(
     }
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
+    let name = payload.name;
     let model = competition_library::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set(payload.name),
+        id: Set(id),
+        name: Set(name.clone()),
         created_at: Set(now),
         updated_at: Set(now),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    competition_library::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(CompetitionResponse { id: model.id, name: model.name }))
+    Ok(Json(CompetitionResponse { id, name }))
 }
 
 /// 从 Excel 导入竞赛名称（仅管理员）。
@@ -176,15 +179,16 @@ pub async fn import_competitions(
             continue;
         }
         let now = Utc::now();
-        competition_library::ActiveModel {
+        let model = competition_library::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(name),
             created_at: Set(now),
             updated_at: Set(now),
-        }
-        .insert(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+        };
+        competition_library::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
         inserted += 1;
     }
 
@@ -273,29 +277,31 @@ pub async fn create_form_field(
         .map_err(|_| AppError::validation("invalid form field payload"))?;
 
     let now = Utc::now();
+    let id = Uuid::new_v4();
     let model = form_fields::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        form_type: Set(payload.form_type),
-        field_key: Set(payload.field_key),
-        label: Set(payload.label),
-        field_type: Set(payload.field_type),
+        id: Set(id),
+        form_type: Set(payload.form_type.clone()),
+        field_key: Set(payload.field_key.clone()),
+        label: Set(payload.label.clone()),
+        field_type: Set(payload.field_type.clone()),
         required: Set(payload.required),
         order_index: Set(payload.order_index),
         created_at: Set(now),
         updated_at: Set(now),
-    }
-    .insert(&state.db)
-    .await
-    .map_err(|err| AppError::Database(err.to_string()))?;
+    };
+    form_fields::Entity::insert(model)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(FormFieldResponse {
-        id: model.id,
-        form_type: model.form_type,
-        field_key: model.field_key,
-        label: model.label,
-        field_type: model.field_type,
-        required: model.required,
-        order_index: model.order_index,
+        id,
+        form_type: payload.form_type,
+        field_key: payload.field_key,
+        label: payload.label,
+        field_type: payload.field_type,
+        required: payload.required,
+        order_index: payload.order_index,
     }))
 }
 
@@ -371,8 +377,9 @@ pub async fn import_volunteer_records(
         let status = resolve_status(&status_value, first_review, final_review);
 
         let now = Utc::now();
+        let record_id = Uuid::new_v4();
         let model = volunteer_records::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(record_id),
             student_id: Set(student.id),
             title: Set(title),
             description: Set(description),
@@ -383,10 +390,11 @@ pub async fn import_volunteer_records(
             rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
             created_at: Set(now),
             updated_at: Set(now),
-        }
-        .insert(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+        };
+        volunteer_records::Entity::insert(model)
+            .exec_without_returning(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
 
         let reserved_headers = collect_reserved_headers(
             &header_index,
@@ -397,7 +405,7 @@ pub async fn import_volunteer_records(
         insert_custom_fields(
             &transaction,
             "volunteer",
-            model.id,
+            record_id,
             row,
             &header_index,
             &field_map,
@@ -487,8 +495,9 @@ pub async fn import_contest_records(
         let status = resolve_status(&status_value, first_review, final_review);
 
         let now = Utc::now();
+        let record_id = Uuid::new_v4();
         let model = contest_records::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(record_id),
             student_id: Set(student.id),
             contest_name: Set(contest_name),
             award_level: Set(award_level),
@@ -499,10 +508,11 @@ pub async fn import_contest_records(
             rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
             created_at: Set(now),
             updated_at: Set(now),
-        }
-        .insert(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+        };
+        contest_records::Entity::insert(model)
+            .exec_without_returning(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
 
         let reserved_headers = collect_reserved_headers(
             &header_index,
@@ -513,7 +523,7 @@ pub async fn import_contest_records(
         insert_custom_fields(
             &transaction,
             "contest",
-            model.id,
+            record_id,
             row,
             &header_index,
             &field_map,
@@ -690,18 +700,88 @@ async fn insert_custom_fields(
             if value.is_empty() {
                 continue;
             }
-            form_field_values::ActiveModel {
+            let value_model = form_field_values::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 record_type: Set(record_type.to_string()),
                 record_id: Set(record_id),
                 field_key: Set(field.field_key.clone()),
                 value: Set(value),
                 created_at: Set(Utc::now()),
-            }
-            .insert(txn)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
+            };
+            form_field_values::Entity::insert(value_model)
+                .exec_without_returning(txn)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use calamine::Data;
+
+    #[test]
+    fn build_header_index_trims_and_ignores_empty() {
+        let row = vec![
+            Data::String(" 学号 ".to_string()),
+            Data::String("".to_string()),
+            Data::String("姓名".to_string()),
+        ];
+        let index = build_header_index(Some(&row));
+        assert_eq!(index.get("学号").copied(), Some(0));
+        assert_eq!(index.get("姓名").copied(), Some(2));
+        assert!(!index.contains_key(""));
+    }
+
+    #[test]
+    fn map_base_indices_resolves_candidates() {
+        let mut header_index = HashMap::new();
+        header_index.insert("学号".to_string(), 0);
+        header_index.insert("标题".to_string(), 1);
+        let result = map_base_indices(&header_index, &[("student_no", &["学号"]), ("title", &["标题"])]);
+        assert_eq!(result.get("student_no").copied(), Some(0));
+        assert_eq!(result.get("title").copied(), Some(1));
+    }
+
+    #[test]
+    fn ensure_required_headers_detects_missing() {
+        let mut base = HashMap::new();
+        base.insert("student_no".to_string(), 0);
+        let result = ensure_required_headers(&base, &["student_no", "title"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_hours_handles_rounding() {
+        assert_eq!(parse_hours("1.6".to_string()), Some(2));
+        assert_eq!(parse_hours("2".to_string()), Some(2));
+        assert_eq!(parse_hours("".to_string()), None);
+    }
+
+    #[test]
+    fn resolve_status_prefers_rejection_then_reviews() {
+        assert_eq!(resolve_status("不通过", None, None), "rejected");
+        assert_eq!(resolve_status("已复审", None, None), "final_reviewed");
+        assert_eq!(resolve_status("", Some(1), None), "first_reviewed");
+        assert_eq!(resolve_status("", None, None), "submitted");
+    }
+
+    #[test]
+    fn collect_reserved_headers_includes_known() {
+        let mut index = HashMap::new();
+        index.insert("学号".to_string(), 0);
+        index.insert("审核状态".to_string(), 1);
+        index.insert("备注".to_string(), 2);
+        let reserved = collect_reserved_headers(
+            &index,
+            &[("student_no", &["学号"])],
+            &["审核状态"],
+            &["备注"],
+        );
+        assert!(reserved.contains(&"学号".to_string()));
+        assert!(reserved.contains(&"审核状态".to_string()));
+        assert!(reserved.contains(&"备注".to_string()));
+    }
 }

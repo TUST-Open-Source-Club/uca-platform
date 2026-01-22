@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import App from '../App.vue'
 
 describe('App', () => {
   it('renders brand', () => {
+    setActivePinia(createPinia())
     const wrapper = mount(App, {
       global: {
+        plugins: [createPinia()],
         stubs: {
           RouterLink: { template: '<a><slot /></a>' },
           RouterView: { template: '<div />' },

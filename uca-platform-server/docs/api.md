@@ -470,6 +470,23 @@
 }
 ```
 
+### PUT /students/{student_no}
+更新学生信息（仅管理员，需会话 Cookie）。
+
+请求：
+```json
+{
+  "name": "张三",
+  "gender": "男",
+  "department": "信息学院",
+  "major": "软件工程",
+  "class_name": "软工1班",
+  "phone": "13800000000"
+}
+```
+
+响应：同创建学生响应结构。
+
 响应：
 ```json
 {
@@ -641,6 +658,19 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 student_no | name | gender | department | major | class_name | phone | self_hours | approved_hours | reason
 ```
 
+### POST /export/labor-hours/summary/excel
+导出劳动教育学时汇总表（Excel）。
+
+请求：
+```json
+{ "department": "信息学院", "major": "软件工程", "class_name": "软工1班" }
+```
+
+表头支持自定义（通过 `form_fields` 的 `form_type=labor_hours_excel` 配置），内置字段 key：
+```
+index | major | class_name | student_no | name | planned_hours | module_hours | reason
+```
+
 ### POST /export/record/{record_type}/{record_id}/pdf
 导出单条记录 PDF。
 说明：`record_type` 仅支持 `contest`。
@@ -802,6 +832,16 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 ### POST /admin/competitions/import
 从 Excel 导入竞赛名称（管理员，multipart 字段 `file`）。
+
+可选字段：
+- `default_year`：年份列缺失时的默认年份。
+- `sheet_plan`：JSON 数组，指定导入的工作表与年份，例如：
+```json
+[
+  { "name": "Sheet1", "year": 2024 },
+  { "name": "Sheet2", "year": 2023 }
+]
+```
 
 响应：
 ```json

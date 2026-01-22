@@ -283,6 +283,7 @@ onMounted(() => {
             <el-form-item label="表单类型" prop="form_type">
               <el-select v-model="formField.form_type">
                 <el-option label="竞赛获奖" value="contest" />
+                <el-option label="劳动教育汇总Excel" value="labor_hours_excel" />
               </el-select>
             </el-form-item>
             <el-form-item label="字段类型" prop="field_type">

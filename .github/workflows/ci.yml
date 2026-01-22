@@ -60,7 +60,7 @@ jobs:
           node-version: 20
       - name: Install dependencies
         working-directory: uca-platform-ui
-        run: npm install
+        run: npm install .
       - name: Run frontend tests
         working-directory: uca-platform-ui
         run: npm run test:unit

@@ -17,6 +17,7 @@ const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
 const competitionDefaultYear = ref<number | null>(null)
+const competitionSheetPlan = ref<{ name: string; year: string }[]>([])
 const importTemplates = ref<ImportTemplate[]>([])
 const showYearDialog = ref(false)
 const result = ref('')
@@ -89,7 +90,21 @@ const handleCompetitionImport = async () => {
   if (!competitionImportRef.value) return
   await competitionImportRef.value.validate(async (valid: boolean) => {
     if (!valid) return
-    if (needsDefaultYear() && !competitionDefaultYear.value) {
+    const sheetPlan = competitionSheetPlan.value
+      .filter((item) => item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        year: item.year ? Number(item.year) : null,
+      }))
+      .map((item) => ({
+        name: item.name,
+        year: Number.isFinite(item.year) && item.year ? item.year : null,
+      }))
+    const needsYearForSheets =
+      needsDefaultYear() &&
+      !competitionDefaultYear.value &&
+      sheetPlan.some((item) => item.year === null)
+    if (needsYearForSheets) {
       showYearDialog.value = true
       return
     }
@@ -98,6 +113,7 @@ const handleCompetitionImport = async () => {
         const data = await importCompetitions(
           competitionImportFile.value as File,
           competitionDefaultYear.value,
+          sheetPlan.length ? sheetPlan : undefined,
         )
         result.value = JSON.stringify(data, null, 2)
       }, { successMessage: '竞赛库已导入' })
@@ -112,6 +128,14 @@ const handleCompetitionImport = async () => {
 const handleCompetitionFileChange = (file: UploadFile) => {
   competitionImportFile.value = file.raw ?? null
   competitionImportForm.fileName = file.name ?? ''
+}
+
+const addCompetitionSheet = () => {
+  competitionSheetPlan.value.push({ name: '', year: '' })
+}
+
+const removeCompetitionSheet = (index: number) => {
+  competitionSheetPlan.value.splice(index, 1)
 }
 
 const handleYearDialogConfirm = async () => {
@@ -190,6 +214,34 @@ onMounted(() => {
             <el-button>选择文件</el-button>
           </el-upload>
         </el-form-item>
+        <div style="margin-top: 8px">
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <strong>工作表选择与年份</strong>
+            <el-button size="small" @click="addCompetitionSheet">新增工作表</el-button>
+          </div>
+          <el-table :data="competitionSheetPlan" style="margin-top: 8px">
+            <el-table-column label="工作表名称">
+              <template #default="{ row }">
+                <el-input v-model="row.name" placeholder="例如 Sheet1" />
+              </template>
+            </el-table-column>
+            <el-table-column label="年份">
+              <template #default="{ row }">
+                <el-input v-model="row.year" placeholder="例如 2024" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{ $index }">
+                <el-button size="small" type="danger" @click="removeCompetitionSheet($index)">
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p style="margin-top: 8px; color: var(--muted)">
+            留空时默认导入第一个工作表；可为每个工作表单独设置年份。
+          </p>
+        </div>
         <el-button
           type="primary"
           style="margin-top: 12px"

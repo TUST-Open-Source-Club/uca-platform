@@ -10,6 +10,15 @@ export type StudentPayload = {
   phone: string
 }
 
+export type StudentUpdatePayload = {
+  name: string
+  gender: string
+  department: string
+  major: string
+  class_name: string
+  phone: string
+}
+
 export async function createStudent(payload: StudentPayload): Promise<unknown> {
   return requestJson('/students', {
     method: 'POST',
@@ -28,4 +37,14 @@ export async function importStudents(file: File): Promise<{ inserted: number; up
   const form = new FormData()
   form.append('file', file)
   return requestMultipart('/students/import', form)
+}
+
+export async function updateStudent(
+  studentNo: string,
+  payload: StudentUpdatePayload,
+): Promise<unknown> {
+  return requestJson(`/students/${encodeURIComponent(studentNo)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
 }

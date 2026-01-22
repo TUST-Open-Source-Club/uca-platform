@@ -15,3 +15,7 @@ export async function exportRecordPdf(recordType: string, recordId: string): Pro
 export async function exportLaborHoursPdf(studentNo: string): Promise<void> {
   return downloadFile(`/export/labor-hours/${encodeURIComponent(studentNo)}/pdf`)
 }
+
+export async function exportLaborHoursSummaryExcel(filters: Record<string, unknown>): Promise<void> {
+  return downloadFile('/export/labor-hours/summary/excel', filters)
+}

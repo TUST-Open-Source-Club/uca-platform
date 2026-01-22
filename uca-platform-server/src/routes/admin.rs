@@ -218,6 +218,12 @@ pub struct ResetCodeResponse {
     pub expires_in_minutes: i64,
 }
 
+#[derive(Debug, Deserialize)]
+struct CompetitionSheetPlan {
+    name: String,
+    year: Option<i32>,
+}
+
 const INVITE_TTL_HOURS: i64 = 72;
 const RESET_TTL_MINUTES: i64 = 24 * 60;
 
@@ -827,65 +833,94 @@ pub async fn import_competitions(
     let default_year = fields
         .get("default_year")
         .and_then(|value| value.parse::<i32>().ok());
+    let sheet_plan = fields
+        .get("sheet_plan")
+        .map(|value| serde_json::from_str::<Vec<CompetitionSheetPlan>>(value))
+        .transpose()
+        .map_err(|_| AppError::bad_request("invalid sheet_plan"))?;
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
-    let sheet_name = workbook
-        .sheet_names()
-        .first()
-        .cloned()
-        .ok_or_else(|| AppError::bad_request("xlsx has no sheets"))?;
-    let range = workbook
-        .worksheet_range(&sheet_name)
-        .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
-
-    let template = load_import_template(&state, "competition_library").await?;
-    let header_index = build_header_index(range.rows().next());
-    let field_map = map_import_fields(&header_index, &template.fields)?;
-    let year_idx = field_map.get("contest_year").copied();
-    if year_idx.is_none() && default_year.is_none() {
-        return Err(AppError::bad_request("default_year required when year column missing"));
+    let sheet_names = workbook.sheet_names().to_vec();
+    if sheet_names.is_empty() {
+        return Err(AppError::bad_request("xlsx has no sheets"));
     }
 
+    let template = load_import_template(&state, "competition_library").await?;
     let mut inserted = 0usize;
     let mut skipped = 0usize;
-    for row in range.rows().skip(1) {
-        let name = field_map
-            .get("contest_name")
-            .map(|idx| read_cell_by_index(*idx, row))
-            .unwrap_or_default();
-        if name.is_empty() {
-            continue;
+
+    let plans = if let Some(plan) = sheet_plan {
+        if plan.is_empty() {
+            return Err(AppError::bad_request("sheet_plan empty"));
         }
-        let year = year_idx
-            .and_then(|idx| read_cell_by_index(idx, row).parse::<i32>().ok())
-            .or(default_year);
-        let category = field_map
-            .get("contest_category")
-            .map(|idx| read_cell_by_index(*idx, row))
-            .filter(|value| !value.is_empty());
-        let exists = CompetitionLibrary::find()
-            .filter(competition_library::Column::Name.eq(&name))
-            .one(&state.db)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        if exists.is_some() {
-            skipped += 1;
-            continue;
+        plan
+    } else {
+        vec![CompetitionSheetPlan {
+            name: sheet_names[0].clone(),
+            year: None,
+        }]
+    };
+
+    for plan in plans {
+        if !sheet_names.contains(&plan.name) {
+            let message = format!("worksheet not found: {}", plan.name);
+            return Err(AppError::bad_request(&message));
         }
-        let now = Utc::now();
-        let model = competition_library::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            year: Set(year),
-            category: Set(category.map(|value| value.to_uppercase())),
-            name: Set(name),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        competition_library::Entity::insert(model)
-            .exec_without_returning(&state.db)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        inserted += 1;
+        let range = workbook
+            .worksheet_range(&plan.name)
+            .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
+
+        let header_index = build_header_index(range.rows().next());
+        let field_map = map_import_fields(&header_index, &template.fields)?;
+        let year_idx = field_map.get("contest_year").copied();
+        let sheet_default_year = plan.year.or(default_year);
+        if year_idx.is_none() && sheet_default_year.is_none() {
+            let message = format!(
+                "default_year required when year column missing in {}",
+                plan.name
+            );
+            return Err(AppError::bad_request(&message));
+        }
+
+        for row in range.rows().skip(1) {
+            let name = field_map
+                .get("contest_name")
+                .map(|idx| read_cell_by_index(*idx, row))
+                .unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let year = year_idx
+                .and_then(|idx| read_cell_by_index(idx, row).parse::<i32>().ok())
+                .or(sheet_default_year);
+            let category = field_map
+                .get("contest_category")
+                .map(|idx| read_cell_by_index(*idx, row))
+                .filter(|value| !value.is_empty());
+            let exists = CompetitionLibrary::find()
+                .filter(competition_library::Column::Name.eq(&name))
+                .one(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
+            if exists.is_some() {
+                skipped += 1;
+                continue;
+            }
+            let now = Utc::now();
+            let model = competition_library::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                year: Set(year),
+                category: Set(category.map(|value| value.to_uppercase())),
+                name: Set(name),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            competition_library::Entity::insert(model)
+                .exec_without_returning(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
+            inserted += 1;
+        }
     }
 
     Ok(Json(serde_json::json!({ "inserted": inserted, "skipped": skipped })))

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { exportLaborHoursPdf, exportRecordPdf, exportStudent, exportSummary } from '../api/exports'
+import { exportLaborHoursPdf, exportLaborHoursSummaryExcel, exportRecordPdf, exportStudent, exportSummary } from '../api/exports'
 import { queryContest, type ContestRecord } from '../api/records'
 import { useRequest } from '../composables/useRequest'
 
@@ -42,6 +42,12 @@ const laborForm = reactive({
   studentNo: '',
 })
 
+const laborSummaryForm = reactive({
+  department: '',
+  major: '',
+  className: '',
+})
+
 const studentFormRef = ref()
 const laborFormRef = ref()
 
@@ -50,6 +56,7 @@ const exportRequest = useRequest()
 const summaryRequest = useRequest()
 const studentRequest = useRequest()
 const laborRequest = useRequest()
+const laborSummaryRequest = useRequest()
 
 const statusOptions = [
   { label: '已提交', value: 'submitted' },
@@ -191,6 +198,19 @@ const handleLaborExport = async () => {
       await exportLaborHoursPdf(laborForm.studentNo)
     }, { successMessage: '劳动教育学时认定表已导出' })
   })
+}
+
+const handleLaborSummaryExport = async () => {
+  await laborSummaryRequest.run(
+    async () => {
+      await exportLaborHoursSummaryExcel({
+        department: laborSummaryForm.department || undefined,
+        major: laborSummaryForm.major || undefined,
+        class_name: laborSummaryForm.className || undefined,
+      })
+    },
+    { successMessage: '劳动教育学时汇总表已导出' },
+  )
 }
 
 onMounted(() => {
@@ -341,6 +361,24 @@ onMounted(() => {
       </el-card>
 
       <el-card class="card">
+        <h4>劳动教育学时汇总表（Excel）</h4>
+        <el-form label-position="top">
+          <el-form-item label="院系">
+            <el-input v-model="laborSummaryForm.department" placeholder="信息学院" />
+          </el-form-item>
+          <el-form-item label="专业">
+            <el-input v-model="laborSummaryForm.major" placeholder="软件工程" />
+          </el-form-item>
+          <el-form-item label="班级">
+            <el-input v-model="laborSummaryForm.className" placeholder="软工1班" />
+          </el-form-item>
+          <el-button type="primary" :loading="laborSummaryRequest.loading" @click="handleLaborSummaryExport">
+            导出 Excel
+          </el-button>
+        </el-form>
+      </el-card>
+
+      <el-card class="card">
         <h4>个人专项表</h4>
         <el-form ref="studentFormRef" :model="studentForm" :rules="studentRules" label-position="top">
           <el-form-item label="学号" prop="studentNo">
@@ -367,12 +405,12 @@ onMounted(() => {
   </el-card>
 
   <el-alert
-    v-if="listRequest.error || exportRequest.error || summaryRequest.error || studentRequest.error || laborRequest.error"
+    v-if="listRequest.error || exportRequest.error || summaryRequest.error || studentRequest.error || laborRequest.error || laborSummaryRequest.error"
     class="card"
     style="margin-top: 24px"
     type="error"
     show-icon
-    :title="listRequest.error || exportRequest.error || summaryRequest.error || studentRequest.error || laborRequest.error"
+    :title="listRequest.error || exportRequest.error || summaryRequest.error || studentRequest.error || laborRequest.error || laborSummaryRequest.error"
     :closable="false"
   />
 </template>

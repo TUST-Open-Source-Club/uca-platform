@@ -40,11 +40,23 @@ export async function deleteCompetition(competitionId: string): Promise<{ status
   return requestJson(`/admin/competitions/${competitionId}`, { method: 'DELETE' })
 }
 
-export async function importCompetitions(file: File, defaultYear?: number | null): Promise<unknown> {
+export type CompetitionSheetPlan = {
+  name: string
+  year?: number | null
+}
+
+export async function importCompetitions(
+  file: File,
+  defaultYear?: number | null,
+  sheetPlan?: CompetitionSheetPlan[],
+): Promise<unknown> {
   const form = new FormData()
   form.append('file', file)
   if (defaultYear !== undefined && defaultYear !== null) {
     form.append('default_year', String(defaultYear))
+  }
+  if (sheetPlan && sheetPlan.length) {
+    form.append('sheet_plan', JSON.stringify(sheetPlan))
   }
   return requestMultipart('/admin/competitions/import', form)
 }

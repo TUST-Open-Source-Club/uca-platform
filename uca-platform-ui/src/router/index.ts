@@ -7,6 +7,7 @@ import AdminCompetitionsView from '../views/admin/AdminCompetitionsView.vue'
 import AdminFormFieldsView from '../views/admin/AdminFormFieldsView.vue'
 import AdminSoftDeleteView from '../views/admin/AdminSoftDeleteView.vue'
 import AdminUsersView from '../views/admin/AdminUsersView.vue'
+import AdminStudentsView from '../views/admin/AdminStudentsView.vue'
 import AdminPasswordPolicyView from '../views/admin/AdminPasswordPolicyView.vue'
 import AdminAuthResetView from '../views/admin/AdminAuthResetView.vue'
 import AdminResetCodeView from '../views/admin/AdminResetCodeView.vue'
@@ -50,6 +51,7 @@ const router = createRouter({
     { path: '/admin/form-fields', component: AdminFormFieldsView },
     { path: '/admin/soft-delete', component: AdminSoftDeleteView },
     { path: '/admin/users', component: AdminUsersView },
+    { path: '/admin/students', component: AdminStudentsView },
     { path: '/admin/password-policy', component: AdminPasswordPolicyView },
     { path: '/admin/auth-reset', component: AdminAuthResetView },
     { path: '/admin/reset-code', component: AdminResetCodeView },

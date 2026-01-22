@@ -188,6 +188,77 @@ pub async fn export_student_excel(
     ))
 }
 
+/// 导出劳动教育学时汇总表（Excel）。
+pub async fn export_labor_hours_summary_excel(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(query): Json<ExportSummaryQuery>,
+) -> Result<Response, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    if user.role != "admin" && user.role != "teacher" && user.role != "reviewer" {
+        return Err(AppError::auth("forbidden"));
+    }
+
+    let mut finder = Student::find();
+    if let Some(value) = query.department {
+        finder = finder.filter(students::Column::Department.eq(value));
+    }
+    if let Some(value) = query.major {
+        finder = finder.filter(students::Column::Major.eq(value));
+    }
+    if let Some(value) = query.class_name {
+        finder = finder.filter(students::Column::ClassName.eq(value));
+    }
+
+    let students = finder
+        .filter(students::Column::IsDeleted.eq(false))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let fields = load_export_fields(&state, "labor_hours_excel").await?;
+    let export_fields = if fields.is_empty() {
+        default_labor_hours_excel_fields()
+    } else {
+        fields
+    };
+
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    for (idx, field) in export_fields.iter().enumerate() {
+        worksheet
+            .write_string(0, idx as u16, &field.label)
+            .map_err(|_| AppError::internal("write excel failed"))?;
+    }
+
+    for (idx, student) in students.iter().enumerate() {
+        let (self_hours, approved_hours, reason) =
+            compute_student_hours(&state, student.id).await?;
+        let row = (idx + 1) as u32;
+        for (col, field) in export_fields.iter().enumerate() {
+            let value = resolve_labor_hours_export_value(
+                field.field_key.as_str(),
+                idx + 1,
+                student,
+                self_hours,
+                approved_hours,
+                &reason,
+            );
+            write_cell(worksheet, row, col as u16, &value)?;
+        }
+    }
+
+    let buffer = workbook
+        .save_to_buffer()
+        .map_err(|_| AppError::internal("save excel failed"))?;
+
+    Ok(file_response(
+        "labor-hours-summary.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        buffer,
+    ))
+}
+
 /// 导出记录 PDF（志愿/竞赛）。
 pub async fn export_record_pdf(
     State(state): State<AppState>,
@@ -904,6 +975,23 @@ fn default_student_fields() -> Vec<ExportField> {
     ]
 }
 
+fn default_labor_hours_excel_fields() -> Vec<ExportField> {
+    vec![
+        ExportField { field_key: "index".to_string(), label: "序号".to_string(), order_index: 1 },
+        ExportField { field_key: "major".to_string(), label: "专业".to_string(), order_index: 2 },
+        ExportField { field_key: "class_name".to_string(), label: "班级".to_string(), order_index: 3 },
+        ExportField { field_key: "student_no".to_string(), label: "学号".to_string(), order_index: 4 },
+        ExportField { field_key: "name".to_string(), label: "姓名".to_string(), order_index: 5 },
+        ExportField { field_key: "planned_hours".to_string(), label: "拟加学时".to_string(), order_index: 6 },
+        ExportField {
+            field_key: "module_hours".to_string(),
+            label: "生产劳动教育模块学时（不少于4学时）".to_string(),
+            order_index: 7,
+        },
+        ExportField { field_key: "reason".to_string(), label: "备注".to_string(), order_index: 8 },
+    ]
+}
+
 fn resolve_export_value(
     field_key: &str,
     student: &students::Model,
@@ -921,6 +1009,30 @@ fn resolve_export_value(
         "phone" => ExportValue::Text(student.phone.clone()),
         "self_hours" => ExportValue::Number(self_hours as f64),
         "approved_hours" => ExportValue::Number(approved_hours as f64),
+        "reason" => ExportValue::Text(reason.to_string()),
+        _ => ExportValue::Text(String::new()),
+    }
+}
+
+fn resolve_labor_hours_export_value(
+    field_key: &str,
+    index: usize,
+    student: &students::Model,
+    self_hours: i32,
+    approved_hours: i32,
+    reason: &str,
+) -> ExportValue {
+    match field_key {
+        "index" => ExportValue::Number(index as f64),
+        "student_no" => ExportValue::Text(student.student_no.clone()),
+        "name" => ExportValue::Text(student.name.clone()),
+        "gender" => ExportValue::Text(student.gender.clone()),
+        "department" => ExportValue::Text(student.department.clone()),
+        "major" => ExportValue::Text(student.major.clone()),
+        "class_name" => ExportValue::Text(student.class_name.clone()),
+        "phone" => ExportValue::Text(student.phone.clone()),
+        "planned_hours" => ExportValue::Number(self_hours as f64),
+        "module_hours" => ExportValue::Number(approved_hours as f64),
         "reason" => ExportValue::Text(reason.to_string()),
         _ => ExportValue::Text(String::new()),
     }

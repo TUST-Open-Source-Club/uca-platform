@@ -29,6 +29,7 @@ const navItems = computed(() => {
     items.push({ path: '/admin/imports', label: '数据导入' })
     items.push({ path: '/admin/competitions', label: '竞赛库管理' })
     items.push({ path: '/admin/form-fields', label: '模板配置' })
+    items.push({ path: '/admin/students', label: '学生名单管理' })
     items.push({ path: '/admin/soft-delete', label: '数据删除（软删除）' })
     items.push({ path: '/admin/users', label: '创建用户 / 邀请' })
     items.push({ path: '/admin/password-policy', label: '密码策略' })

@@ -1,6 +1,6 @@
 //! 学生名单接口。
 
-use axum::{extract::{State, Multipart}, Json};
+use axum::{extract::{State, Multipart, Path}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
 use chrono::Utc;
@@ -61,6 +61,29 @@ pub struct CreateStudentRequest {
     /// 学号。
     #[validate(length(min = 4, max = 32))]
     pub student_no: String,
+    /// 姓名。
+    #[validate(length(min = 1, max = 64))]
+    pub name: String,
+    /// 性别。
+    #[validate(length(min = 1, max = 8))]
+    pub gender: String,
+    /// 院系。
+    #[validate(length(min = 1, max = 64))]
+    pub department: String,
+    /// 专业。
+    #[validate(length(min = 1, max = 64))]
+    pub major: String,
+    /// 班级。
+    #[validate(length(min = 1, max = 64))]
+    pub class_name: String,
+    /// 手机号。
+    #[validate(length(min = 6, max = 32))]
+    pub phone: String,
+}
+
+/// 更新学生请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateStudentRequest {
     /// 姓名。
     #[validate(length(min = 1, max = 64))]
     pub name: String,
@@ -155,6 +178,46 @@ pub async fn create_student(
         created_at: now,
         updated_at: now,
     };
+    Ok(Json(StudentResponse::from(model)))
+}
+
+/// 更新学生信息（仅管理员）。
+pub async fn update_student(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+    Json(payload): Json<UpdateStudentRequest>,
+) -> Result<Json<StudentResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    payload
+        .validate()
+        .map_err(|_| AppError::validation("invalid student payload"))?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .filter(students::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    let mut active: students::ActiveModel = student.into();
+    active.name = Set(payload.name.clone());
+    active.gender = Set(payload.gender.clone());
+    active.department = Set(payload.department.clone());
+    active.major = Set(payload.major.clone());
+    active.class_name = Set(payload.class_name.clone());
+    active.phone = Set(payload.phone.clone());
+    active.updated_at = Set(Utc::now());
+    let model = active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    upsert_student_user(&state.db, &student_no, &payload.name).await?;
+
     Ok(Json(StudentResponse::from(model)))
 }
 

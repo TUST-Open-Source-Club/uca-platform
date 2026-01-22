@@ -87,6 +87,7 @@ vi.mock('../api/exports', () => ({
   exportStudent: vi.fn().mockResolvedValue({}),
   exportRecordPdf: vi.fn().mockResolvedValue({}),
   exportLaborHoursPdf: vi.fn().mockResolvedValue({}),
+  exportLaborHoursSummaryExcel: vi.fn().mockResolvedValue({}),
 }))
 
 vi.mock('../api/attachments', () => ({

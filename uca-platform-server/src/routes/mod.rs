@@ -1,6 +1,6 @@
 //! HTTP 路由处理器。
 
-use axum::{routing::{delete, get, post}, Router};
+use axum::{routing::{delete, get, post, put}, Router};
 
 use crate::state::AppState;
 
@@ -34,7 +34,6 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/totp/enroll/finish", post(auth::totp_enroll_finish))
         .route("/auth/totp/verify", post(auth::totp_verify))
         .route("/auth/recovery/verify", post(auth::recovery_verify))
-        .route("/auth/recovery/regenerate", post(auth::recovery_regenerate))
         .route("/auth/email/bind", post(auth::bind_email))
         .route("/auth/password/change", post(auth::change_password))
         .route("/auth/password/reset/request", post(auth::password_reset_request))
@@ -61,6 +60,8 @@ pub fn router(state: AppState) -> Router {
         .route("/export/labor-hours/:student_no/pdf", post(exports::export_labor_hours_pdf))
         .route("/admin/competitions", get(admin::list_competitions))
         .route("/admin/competitions", post(admin::create_competition))
+        .route("/admin/competitions/:competition_id", put(admin::update_competition))
+        .route("/admin/competitions/:competition_id", delete(admin::delete_competition))
         .route("/admin/competitions/import", post(admin::import_competitions))
         .route("/admin/users", post(admin::create_user))
         .route("/admin/users/reset/totp", post(admin::reset_user_totp))

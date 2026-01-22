@@ -208,9 +208,9 @@ fn default_import_template(template_key: &str) -> ImportTemplateConfig {
                     field_key: "contest_year".to_string(),
                     label: "年份".to_string(),
                     column_title: "年份".to_string(),
-                    required: true,
+                    required: false,
                     order_index: 1,
-                    description: Some("竞赛年份".to_string()),
+                    description: Some("竞赛年份（可选）".to_string()),
                 },
                 ImportFieldConfig {
                     field_key: "contest_category".to_string(),

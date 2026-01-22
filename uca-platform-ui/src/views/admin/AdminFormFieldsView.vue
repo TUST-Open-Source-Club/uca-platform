@@ -337,7 +337,7 @@ onMounted(() => {
           </el-table-column>
           <el-table-column label="字段标签" width="160">
             <template #default="{ row }">
-              <el-input v-model="row.label" />
+              <el-input v-model="row.label" disabled />
             </template>
           </el-table-column>
           <el-table-column label="表头映射">

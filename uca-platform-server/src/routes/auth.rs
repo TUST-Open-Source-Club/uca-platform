@@ -22,9 +22,9 @@ use webauthn_rs::prelude::{
 
 use crate::{
     auth::{
-        decrypt_secret, encrypt_secret, generate_recovery_codes, generate_session_token,
-        generate_token, generate_totp, hash_password, hash_session_token, hash_token,
-        verify_password, verify_recovery_code, verify_totp,
+        decrypt_secret, encrypt_secret, generate_session_token, generate_token, generate_totp,
+        hash_password, hash_session_token, hash_token, verify_password, verify_recovery_code,
+        verify_totp,
     },
     entities::{
         auth_resets, devices, invites, passkeys, recovery_codes, sessions, totp_secrets, users,
@@ -36,7 +36,7 @@ use crate::{
     state::{AppState, PasskeyAuthSession, PasskeyRegisterSession, ReauthSession},
 };
 
-const PASSWORD_RESET_TTL_MINUTES: i64 = 30;
+const PASSWORD_RESET_TTL_MINUTES: i64 = 24 * 60;
 const REAUTH_TTL_SECONDS: i64 = 300;
 
 /// 基础健康检查响应。
@@ -1211,8 +1211,9 @@ pub async fn password_reset_request(
 
     let link = format!("{}/password-reset?token={}", base_url, token);
     let body = format!(
-        "您好，\n\n请使用以下链接重置您的密码：\n{}\n\n该链接 {} 分钟后失效。",
-        link, PASSWORD_RESET_TTL_MINUTES
+        "您好，\n\n请使用以下链接重置您的密码：\n{}\n\n该链接 {} 小时后失效。",
+        link,
+        PASSWORD_RESET_TTL_MINUTES / 60
     );
     send_mail(mail_config, &email, "密码重置", &body).await?;
 
@@ -1473,40 +1474,6 @@ pub async fn reset_consume(
             purpose,
         }),
     ))
-}
-
-/// 为当前用户重新生成恢复码。
-pub async fn recovery_regenerate(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let user = require_session(&state, &jar).await?;
-
-    RecoveryCode::delete_many()
-        .filter(recovery_codes::Column::UserId.eq(user.id))
-        .exec(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let codes = generate_recovery_codes(8)?;
-    let now = Utc::now();
-    for code in &codes {
-        let recovery_model = recovery_codes::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(user.id),
-            code_hash: Set(code.hash.clone()),
-            used_at: Set(None),
-            created_at: Set(now),
-        };
-        recovery_codes::Entity::insert(recovery_model)
-            .exec_without_returning(&state.db)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-    }
-
-    Ok(Json(serde_json::json!({
-        "codes": codes.into_iter().map(|c| c.plain).collect::<Vec<_>>()
-    })))
 }
 
 /// 列出当前用户的设备。

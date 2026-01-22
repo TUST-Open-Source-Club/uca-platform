@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { loginOptions, passkeyFinish, passkeyStart, passwordLogin, recoveryVerify, totpVerify } from '../api/auth'
+import { loginOptions, passkeyFinish, passkeyStart, passwordLogin, totpVerify } from '../api/auth'
 import { listCompetitionsPublic } from '../api/catalog'
 import { useRequest } from '../composables/useRequest'
 import { useAuthStore } from '../stores/auth'
@@ -26,16 +26,15 @@ const authStore = useAuthStore()
 const methods = [
   { id: 'passkey', title: 'Passkey 登录', desc: '使用设备生物识别或安全密钥' },
   { id: 'totp', title: 'TOTP 登录', desc: '输入动态验证码' },
-  { id: 'recovery', title: '恢复码登录', desc: '使用一次性恢复码' },
   { id: 'password', title: '密码登录', desc: '仅学生可使用默认或自设密码' },
 ]
-const availableMethods = ref<string[]>(['passkey', 'totp', 'recovery'])
+const availableMethods = ref<string[]>(['passkey', 'totp'])
 
 const rules = {
   username: [{ required: true, message: '请输入学号/工号', trigger: 'blur' }],
   code: [
     {
-      required: () => form.method === 'totp' || form.method === 'recovery',
+      required: () => form.method === 'totp',
       message: '请输入验证码',
       trigger: 'blur',
     },
@@ -129,13 +128,6 @@ const handleLogin = async () => {
         return
       }
 
-      const data = await recoveryVerify(form.username, form.code)
-      result.value = JSON.stringify(data, null, 2)
-      const profile = await authStore.refreshSession()
-      if (!profile) {
-        throw new Error('登录会话未建立，请检查 Cookie 或后端状态')
-      }
-      await router.push(authStore.homePath())
     },
       { successMessage: '登录成功' },
     )
@@ -194,7 +186,7 @@ const handleLogin = async () => {
           />
         </el-select>
       </el-form-item>
-      <el-form-item v-if="form.method === 'totp' || form.method === 'recovery'" label="验证码" prop="code">
+      <el-form-item v-if="form.method === 'totp'" label="验证码" prop="code">
         <el-input v-model="form.code" placeholder="请输入验证码" />
       </el-form-item>
       <el-form-item v-if="form.method === 'password'" label="密码" prop="password">

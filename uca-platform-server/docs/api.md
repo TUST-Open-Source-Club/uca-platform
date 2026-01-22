@@ -88,7 +88,7 @@
 
 响应：
 ```json
-{ "methods": ["passkey", "totp", "recovery", "password"] }
+{ "methods": ["passkey", "totp", "password"] }
 ```
 
 ### GET /auth/password-policy
@@ -424,13 +424,7 @@
 { "user_id": "<uuid>", "purpose": "totp" }
 ```
 
-### POST /auth/recovery/regenerate
-重新生成恢复码（需要会话 Cookie），旧恢复码将失效。
-
-响应：
-```json
-{ "codes": ["恢复码1", "恢复码2", "..."] }
-```
+（已移除用户自助恢复码生成接口）
 
 ### GET /auth/devices
 列出当前用户已绑定设备（需要会话 Cookie）。
@@ -786,7 +780,7 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 响应：
 ```json
-{ "code": "ABCD1234", "expires_in_minutes": 30 }
+{ "code": "ABCD1234", "expires_in_minutes": 1440 }
 ```
 
 ### GET /admin/competitions
@@ -794,6 +788,12 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 ### POST /admin/competitions
 新增竞赛名称（管理员）。
+
+### PUT /admin/competitions/{competition_id}
+更新竞赛名称（管理员）。
+
+### DELETE /admin/competitions/{competition_id}
+删除竞赛名称（管理员）。
 
 请求：
 ```json

@@ -45,7 +45,7 @@ const handleResetCode = async () => {
           生成重置码
         </el-button>
       </el-form>
-      <p style="margin-top: 8px; color: var(--muted)">重置码仅可使用一次，泄露后请重新生成。</p>
+      <p style="margin-top: 8px; color: var(--muted)">重置码 24 小时内有效，仅可使用一次。</p>
     </el-card>
   </div>
 

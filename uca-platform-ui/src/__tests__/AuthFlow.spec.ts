@@ -16,7 +16,6 @@ vi.mock('element-plus', () => ({
 const passkeyStart = vi.fn()
 const passkeyFinish = vi.fn()
 const totpVerify = vi.fn()
-const recoveryVerify = vi.fn()
 const passwordLogin = vi.fn()
 const loginOptions = vi.fn()
 const getCurrentUser = vi.fn()
@@ -25,7 +24,6 @@ vi.mock('../api/auth', () => ({
   passkeyStart: (...args: unknown[]) => passkeyStart(...args),
   passkeyFinish: (...args: unknown[]) => passkeyFinish(...args),
   totpVerify: (...args: unknown[]) => totpVerify(...args),
-  recoveryVerify: (...args: unknown[]) => recoveryVerify(...args),
   passwordLogin: (...args: unknown[]) => passwordLogin(...args),
   loginOptions: (...args: unknown[]) => loginOptions(...args),
   getCurrentUser: (...args: unknown[]) => getCurrentUser(...args),
@@ -81,9 +79,8 @@ beforeEach(() => {
   passkeyStart.mockReset()
   passkeyFinish.mockReset()
   totpVerify.mockReset()
-  recoveryVerify.mockReset()
   passwordLogin.mockReset()
-  loginOptions.mockResolvedValue({ methods: ['passkey', 'totp', 'recovery', 'password'] })
+  loginOptions.mockResolvedValue({ methods: ['passkey', 'totp', 'password'] })
   getCurrentUser.mockReset()
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -115,25 +112,6 @@ describe('Auth flow', () => {
     await flushPromises()
     expect(totpVerify).toHaveBeenCalledWith('u1', '123456')
     expect(router.currentRoute.value.fullPath).toBe('/student')
-  })
-
-  it('logs in with recovery code and redirects to review home', async () => {
-    recoveryVerify.mockResolvedValue({ ok: true })
-    getCurrentUser.mockResolvedValue({ id: 'u2', username: 'u2', display_name: 'u2', role: 'reviewer' })
-    const router = buildRouter()
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    await router.push('/')
-    await router.isReady()
-    const wrapper = mount(LoginView, { global: { stubs, plugins: [pinia, router] } })
-    wrapper.vm.form.username = 'u2'
-    wrapper.vm.form.code = 'RCODE'
-    wrapper.vm.form.method = 'recovery'
-    const submit = wrapper.findAll('button').find((btn) => btn.text() === '进入认证')
-    await submit?.trigger('click')
-    await flushPromises()
-    expect(recoveryVerify).toHaveBeenCalledWith('u2', 'RCODE')
-    expect(router.currentRoute.value.fullPath).toBe('/review')
   })
 
   it('logs in with passkey and redirects to admin home', async () => {

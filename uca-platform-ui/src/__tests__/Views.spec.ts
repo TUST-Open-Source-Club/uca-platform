@@ -79,13 +79,14 @@ vi.mock('../api/admin', () => ({
   }),
   resetUserTotp: vi.fn().mockResolvedValue({ status: 'ok' }),
   resetUserPasskey: vi.fn().mockResolvedValue({ status: 'ok' }),
-  generateResetCode: vi.fn().mockResolvedValue({ code: 'RESET123', expires_in_minutes: 30 }),
+  generateResetCode: vi.fn().mockResolvedValue({ code: 'RESET123', expires_in_minutes: 1440 }),
 }))
 
 vi.mock('../api/exports', () => ({
   exportSummary: vi.fn().mockResolvedValue({}),
   exportStudent: vi.fn().mockResolvedValue({}),
   exportRecordPdf: vi.fn().mockResolvedValue({}),
+  exportLaborHoursPdf: vi.fn().mockResolvedValue({}),
 }))
 
 vi.mock('../api/attachments', () => ({
@@ -95,7 +96,7 @@ vi.mock('../api/attachments', () => ({
 vi.mock('../api/auth', () => ({
   totpVerify: vi.fn().mockResolvedValue({}),
   listDevices: vi.fn().mockResolvedValue([]),
-  regenerateRecoveryCodes: vi.fn().mockResolvedValue({ codes: [] }),
+  getCurrentUser: vi.fn().mockResolvedValue({ id: 'u1', username: 'u1', display_name: 'u1', role: 'reviewer' }),
   bootstrapStatus: vi.fn().mockResolvedValue({ ready: true, needs_totp: false }),
   totpEnrollStart: vi.fn().mockResolvedValue({ enrollment_id: 'e1', otpauth_url: 'otpauth://totp/demo' }),
   totpEnrollFinish: vi.fn().mockResolvedValue({ status: 'ok' }),
@@ -116,6 +117,11 @@ const stubs = {
   'el-table-column': { template: '<col />' },
   'el-empty': { template: '<div />' },
   'el-divider': { template: '<hr />' },
+  'el-dialog': { template: '<div><slot /><slot name=\"footer\" /></div>' },
+  'el-drawer': { template: '<div><slot /></div>' },
+  'el-descriptions': { template: '<div><slot /></div>' },
+  'el-descriptions-item': { template: '<div><slot /></div>' },
+  'el-pagination': { template: '<div />' },
 }
 
 describe('Views', () => {
@@ -132,7 +138,7 @@ describe('Views', () => {
   })
 
   it('renders review dashboard', () => {
-    const wrapper = mount(ReviewDashboard, { global: { stubs } })
+    const wrapper = mount(ReviewDashboard, { global: { stubs, plugins: [createPinia()] } })
     expect(wrapper.text()).toContain('审核中心')
   })
 
@@ -152,8 +158,8 @@ describe('Views', () => {
   })
 
   it('renders devices view', () => {
-    const wrapper = mount(DevicesView, { global: { stubs } })
-    expect(wrapper.text()).toContain('设备与恢复码')
+    const wrapper = mount(DevicesView, { global: { stubs, plugins: [createPinia()] } })
+    expect(wrapper.text()).toContain('设备与认证')
   })
 
   it('renders purge view', () => {

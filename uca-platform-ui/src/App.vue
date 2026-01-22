@@ -36,7 +36,7 @@ const navItems = computed(() => {
     items.push({ path: '/admin/reset-code', label: '一次性重置码' })
   }
 
-  items.push({ path: '/devices', label: '设备与恢复码' })
+  items.push({ path: '/devices', label: '设备与认证' })
   return items
 })
 </script>

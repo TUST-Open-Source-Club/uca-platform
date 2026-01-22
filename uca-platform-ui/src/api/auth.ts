@@ -70,13 +70,6 @@ export async function totpVerify(username: string, code: string): Promise<{ user
   })
 }
 
-export async function recoveryVerify(username: string, code: string): Promise<{ user_id: string }> {
-  return requestJson('/auth/recovery/verify', {
-    method: 'POST',
-    body: JSON.stringify({ username, code }),
-  })
-}
-
 export async function passwordLogin(username: string, password: string): Promise<{ user_id: string }> {
   return requestJson('/auth/password/login', {
     method: 'POST',
@@ -106,10 +99,6 @@ export async function getCurrentUser(): Promise<CurrentUser> {
 
 export async function getPasswordPolicy(): Promise<PasswordPolicy> {
   return requestJson('/auth/password-policy', { method: 'GET' })
-}
-
-export async function regenerateRecoveryCodes(): Promise<{ codes: string[] }> {
-  return requestJson('/auth/recovery/regenerate', { method: 'POST' })
 }
 
 export async function bootstrapStatus(): Promise<{ ready: boolean; needs_totp: boolean }> {

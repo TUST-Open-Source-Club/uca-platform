@@ -43,6 +43,18 @@ pub struct CreateCompetitionRequest {
     pub category: Option<String>,
 }
 
+/// 竞赛库更新请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateCompetitionRequest {
+    /// 竞赛名称。
+    #[validate(length(min = 1, max = 200))]
+    pub name: String,
+    /// 竞赛年份。
+    pub year: Option<i32>,
+    /// 竞赛类型（A/B）。
+    pub category: Option<String>,
+}
+
 /// 竞赛库响应。
 #[derive(Debug, Serialize)]
 pub struct CompetitionResponse {
@@ -207,7 +219,7 @@ pub struct ResetCodeResponse {
 }
 
 const INVITE_TTL_HOURS: i64 = 72;
-const RESET_TTL_MINUTES: i64 = 30;
+const RESET_TTL_MINUTES: i64 = 24 * 60;
 
 const COMPETITION_HEADER: [&str; 2] = ["竞赛名称", "name"];
 const CONTEST_BASE_HEADERS: [(&str, &[&str]); 6] = [
@@ -315,6 +327,75 @@ pub async fn create_competition(
         category,
         name,
     }))
+}
+
+/// 更新竞赛名称库记录。
+pub async fn update_competition(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(competition_id): Path<Uuid>,
+    Json(payload): Json<UpdateCompetitionRequest>,
+) -> Result<Json<CompetitionResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    payload
+        .validate()
+        .map_err(|_| AppError::validation("invalid competition payload"))?;
+
+    let existing = CompetitionLibrary::find()
+        .filter(competition_library::Column::Id.eq(competition_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("competition not found"))?;
+
+    let name_exists = CompetitionLibrary::find()
+        .filter(competition_library::Column::Name.eq(&payload.name))
+        .filter(competition_library::Column::Id.ne(competition_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if name_exists.is_some() {
+        return Err(AppError::bad_request("competition exists"));
+    }
+
+    let mut active: competition_library::ActiveModel = existing.into();
+    let category = payload.category.as_ref().map(|value| value.to_uppercase());
+    active.name = Set(payload.name.clone());
+    active.year = Set(payload.year);
+    active.category = Set(category.clone());
+    active.updated_at = Set(Utc::now());
+    let model = active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(CompetitionResponse {
+        id: model.id,
+        year: model.year,
+        category: model.category,
+        name: model.name,
+    }))
+}
+
+/// 删除竞赛名称库记录。
+pub async fn delete_competition(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(competition_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let result = CompetitionLibrary::delete_by_id(competition_id)
+        .exec(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if result.rows_affected == 0 {
+        return Err(AppError::not_found("competition not found"));
+    }
+
+    Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
 /// 管理员创建用户或发送邀请。
@@ -610,8 +691,9 @@ pub async fn reset_user_totp(
 
     let link = format!("{}/reset?token={}", base_url, token);
     let body = format!(
-        "您好，\n\n请点击以下链接重置您的 TOTP：\n{}\n\n该链接 {} 分钟后失效。",
-        link, RESET_TTL_MINUTES
+        "您好，\n\n请点击以下链接重置您的 TOTP：\n{}\n\n该链接 {} 小时后失效。",
+        link,
+        RESET_TTL_MINUTES / 60
     );
     send_mail(mail_config, &email, "TOTP 重置", &body).await?;
     Ok(Json(serde_json::json!({"status": "ok"})))
@@ -670,8 +752,9 @@ pub async fn reset_user_passkey(
 
     let link = format!("{}/reset?token={}", base_url, token);
     let body = format!(
-        "您好，\n\n请点击以下链接重置您的 Passkey：\n{}\n\n该链接 {} 分钟后失效。",
-        link, RESET_TTL_MINUTES
+        "您好，\n\n请点击以下链接重置您的 Passkey：\n{}\n\n该链接 {} 小时后失效。",
+        link,
+        RESET_TTL_MINUTES / 60
     );
     send_mail(mail_config, &email, "Passkey 重置", &body).await?;
     Ok(Json(serde_json::json!({"status": "ok"})))
@@ -740,7 +823,10 @@ pub async fn import_competitions(
     let user = require_session_user(&state, &jar).await?;
     require_role(&user, "admin")?;
 
-    let file_bytes = read_upload_bytes(&mut multipart).await?;
+    let (file_bytes, fields) = read_upload_payload(&mut multipart).await?;
+    let default_year = fields
+        .get("default_year")
+        .and_then(|value| value.parse::<i32>().ok());
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
     let sheet_name = workbook
@@ -755,6 +841,10 @@ pub async fn import_competitions(
     let template = load_import_template(&state, "competition_library").await?;
     let header_index = build_header_index(range.rows().next());
     let field_map = map_import_fields(&header_index, &template.fields)?;
+    let year_idx = field_map.get("contest_year").copied();
+    if year_idx.is_none() && default_year.is_none() {
+        return Err(AppError::bad_request("default_year required when year column missing"));
+    }
 
     let mut inserted = 0usize;
     let mut skipped = 0usize;
@@ -766,9 +856,9 @@ pub async fn import_competitions(
         if name.is_empty() {
             continue;
         }
-        let year = field_map
-            .get("contest_year")
-            .and_then(|idx| read_cell_by_index(*idx, row).parse::<i32>().ok());
+        let year = year_idx
+            .and_then(|idx| read_cell_by_index(idx, row).parse::<i32>().ok())
+            .or(default_year);
         let category = field_map
             .get("contest_category")
             .map(|idx| read_cell_by_index(*idx, row))
@@ -944,6 +1034,12 @@ pub async fn update_import_template(
         return Err(AppError::bad_request("unknown template key"));
     }
 
+    let base_template = load_import_template(&state, &template_key).await?;
+    let mut label_map = HashMap::new();
+    for field in base_template.fields {
+        label_map.insert(field.field_key, field.label);
+    }
+
     let mut seen = HashSet::new();
     for field in &payload.fields {
         field
@@ -1001,11 +1097,15 @@ pub async fn update_import_template(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     for field in &payload.fields {
+        let label = label_map
+            .get(&field.field_key)
+            .cloned()
+            .unwrap_or_else(|| field.label.clone());
         let model = import_template_fields::ActiveModel {
             id: Set(Uuid::new_v4()),
             template_id: Set(template_id),
             field_key: Set(field.field_key.clone()),
-            label: Set(field.label.clone()),
+            label: Set(label),
             column_title: Set(field.column_title.clone()),
             required: Set(field.required),
             order_index: Set(field.order_index),
@@ -1031,8 +1131,11 @@ pub async fn update_import_template(
             .fields
             .into_iter()
             .map(|field| ImportFieldConfig {
-                field_key: field.field_key,
-                label: field.label,
+                field_key: field.field_key.clone(),
+                label: label_map
+                    .get(&field.field_key)
+                    .cloned()
+                    .unwrap_or(field.label),
                 column_title: field.column_title,
                 required: field.required,
                 order_index: field.order_index,
@@ -1487,6 +1590,39 @@ async fn read_upload_bytes(multipart: &mut Multipart) -> Result<Vec<u8>, AppErro
         }
     }
     Err(AppError::bad_request("file field required"))
+}
+
+async fn read_upload_payload(
+    multipart: &mut Multipart,
+) -> Result<(Vec<u8>, HashMap<String, String>), AppError> {
+    let mut file_bytes = None;
+    let mut fields = HashMap::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::bad_request("invalid multipart"))?
+    {
+        let name = field.name().map(|value| value.to_string());
+        match name.as_deref() {
+            Some("file") => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read file"))?;
+                file_bytes = Some(bytes.to_vec());
+            }
+            Some(key) => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read field"))?;
+                fields.insert(key.to_string(), value);
+            }
+            None => {}
+        }
+    }
+    let file_bytes = file_bytes.ok_or_else(|| AppError::bad_request("file field required"))?;
+    Ok((file_bytes, fields))
 }
 
 fn build_header_index(header_row: Option<&[Data]>) -> HashMap<String, usize> {

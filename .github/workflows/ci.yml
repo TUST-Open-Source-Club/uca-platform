@@ -62,7 +62,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: uca-platform-ui/pnpm-lock.yaml
+          cache-dependency-path: '**/pnpm-lock.yaml'
       - name: Install dependencies
         working-directory: uca-platform-ui
         run: pnpm install

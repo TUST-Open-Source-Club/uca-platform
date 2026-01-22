@@ -11,7 +11,6 @@ import {
   reauthPasskeyStart,
   reauthPassword,
   reauthTotp,
-  regenerateRecoveryCodes,
   totpEnrollFinish,
   totpEnrollStart,
 } from '../api/auth'
@@ -30,14 +29,12 @@ type Device = {
 
 const authStore = useAuthStore()
 const devices = ref<Device[]>([])
-const codes = ref('')
 const qrDataUrl = ref('')
 const totpStep = ref<'idle' | 'setup'>('idle')
 const reauthToken = ref('')
 const reauthExpiresAt = ref<number | null>(null)
 
 const devicesRequest = useRequest()
-const codesRequest = useRequest()
 const reauthRequest = useRequest()
 const totpRequest = useRequest()
 const passkeyRequest = useRequest()
@@ -113,13 +110,6 @@ const handleLoad = async () => {
     const data = await listDevices()
     devices.value = data as Device[]
   }, { successMessage: '已刷新设备列表' })
-}
-
-const handleRegenerate = async () => {
-  await codesRequest.run(async () => {
-    const data = await regenerateRecoveryCodes()
-    codes.value = data.codes.join('\n')
-  }, { successMessage: '恢复码已生成' })
 }
 
 const handleReauth = async () => {
@@ -221,8 +211,8 @@ onMounted(async () => {
 
 <template>
   <section class="hero">
-    <h1>设备与恢复码</h1>
-    <p>添加或移除 Passkey/TOTP 设备，生成恢复码。</p>
+    <h1>设备与认证</h1>
+    <p>添加或移除 Passkey/TOTP 设备，维护二次验证。</p>
   </section>
 
   <div class="card-grid">
@@ -308,22 +298,15 @@ onMounted(async () => {
       <p v-else style="margin-top: 12px">暂无设备</p>
     </el-card>
 
-    <el-card class="card">
-      <h3>恢复码</h3>
-      <el-button type="primary" :loading="codesRequest.loading" @click="handleRegenerate">
-        生成恢复码
-      </el-button>
-      <pre v-if="codes" style="white-space: pre-wrap">{{ codes }}</pre>
-    </el-card>
   </div>
 
   <el-alert
-    v-if="devicesRequest.error || codesRequest.error || reauthRequest.error || totpRequest.error || passkeyRequest.error || deleteRequest.error"
+    v-if="devicesRequest.error || reauthRequest.error || totpRequest.error || passkeyRequest.error || deleteRequest.error"
     class="card"
     style="margin-top: 24px"
     type="error"
     show-icon
-    :title="devicesRequest.error || codesRequest.error || reauthRequest.error || totpRequest.error || passkeyRequest.error || deleteRequest.error"
+    :title="devicesRequest.error || reauthRequest.error || totpRequest.error || passkeyRequest.error || deleteRequest.error"
     :closable="false"
   />
 </template>

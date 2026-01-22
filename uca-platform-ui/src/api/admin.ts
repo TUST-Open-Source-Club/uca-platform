@@ -22,9 +22,30 @@ export async function createCompetition(payload: {
   })
 }
 
-export async function importCompetitions(file: File): Promise<unknown> {
+export async function updateCompetition(
+  competitionId: string,
+  payload: {
+    name: string
+    year?: number | null
+    category?: string | null
+  },
+): Promise<CompetitionItem> {
+  return requestJson(`/admin/competitions/${competitionId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteCompetition(competitionId: string): Promise<{ status: string }> {
+  return requestJson(`/admin/competitions/${competitionId}`, { method: 'DELETE' })
+}
+
+export async function importCompetitions(file: File, defaultYear?: number | null): Promise<unknown> {
   const form = new FormData()
   form.append('file', file)
+  if (defaultYear !== undefined && defaultYear !== null) {
+    form.append('default_year', String(defaultYear))
+  }
   return requestMultipart('/admin/competitions/import', form)
 }
 

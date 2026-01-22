@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import type { UploadFile } from 'element-plus'
 import {
   importCompetitions,
   importContestRecords,
+  listImportTemplates,
+  type ImportTemplate,
 } from '../../api/admin'
 import { importStudents } from '../../api/students'
 import { useRequest } from '../../composables/useRequest'
@@ -14,11 +16,15 @@ const contestImportRef = ref()
 const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
+const competitionDefaultYear = ref<number | null>(null)
+const importTemplates = ref<ImportTemplate[]>([])
+const showYearDialog = ref(false)
 const result = ref('')
 
 const importRequest = useRequest()
 const competitionImportRequest = useRequest()
 const contestImportRequest = useRequest()
+const templateRequest = useRequest()
 
 const importForm = reactive({
   fileName: '',
@@ -32,6 +38,10 @@ const contestImportForm = reactive({
   fileName: '',
 })
 
+const yearDialogForm = reactive({
+  year: '',
+})
+
 const importRules = {
   fileName: [{ required: true, message: '请选择 Excel 文件', trigger: 'change' }],
 }
@@ -42,6 +52,18 @@ const competitionImportRules = {
 
 const contestImportRules = {
   fileName: [{ required: true, message: '请选择竞赛获奖导入文件', trigger: 'change' }],
+}
+
+const loadImportTemplates = async () => {
+  await templateRequest.run(async () => {
+    importTemplates.value = await listImportTemplates()
+  })
+}
+
+const needsDefaultYear = () => {
+  const template = importTemplates.value.find((item) => item.template_key === 'competition_library')
+  const yearField = template?.fields.find((field) => field.field_key === 'contest_year')
+  return !yearField || !yearField.column_title || yearField.column_title.trim() === ''
 }
 
 const handleImport = async () => {
@@ -67,16 +89,40 @@ const handleCompetitionImport = async () => {
   if (!competitionImportRef.value) return
   await competitionImportRef.value.validate(async (valid: boolean) => {
     if (!valid) return
-    await competitionImportRequest.run(async () => {
-      const data = await importCompetitions(competitionImportFile.value as File)
-      result.value = JSON.stringify(data, null, 2)
-    }, { successMessage: '竞赛库已导入' })
+    if (needsDefaultYear() && !competitionDefaultYear.value) {
+      showYearDialog.value = true
+      return
+    }
+    try {
+      await competitionImportRequest.run(async () => {
+        const data = await importCompetitions(
+          competitionImportFile.value as File,
+          competitionDefaultYear.value,
+        )
+        result.value = JSON.stringify(data, null, 2)
+      }, { successMessage: '竞赛库已导入' })
+    } catch {
+      if (competitionImportRequest.error.includes('default_year required')) {
+        showYearDialog.value = true
+      }
+    }
   })
 }
 
 const handleCompetitionFileChange = (file: UploadFile) => {
   competitionImportFile.value = file.raw ?? null
   competitionImportForm.fileName = file.name ?? ''
+}
+
+const handleYearDialogConfirm = async () => {
+  const parsed = Number(yearDialogForm.year)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    competitionImportRequest.error = '请输入有效年份'
+    return
+  }
+  competitionDefaultYear.value = parsed
+  showYearDialog.value = false
+  await handleCompetitionImport()
 }
 
 const handleContestImport = async () => {
@@ -94,6 +140,10 @@ const handleContestFileChange = (file: UploadFile) => {
   contestImportFile.value = file.raw ?? null
   contestImportForm.fileName = file.name ?? ''
 }
+
+onMounted(() => {
+  void loadImportTemplates()
+})
 </script>
 
 <template>
@@ -149,6 +199,14 @@ const handleContestFileChange = (file: UploadFile) => {
           导入竞赛库
         </el-button>
       </el-form>
+      <el-alert
+        v-if="needsDefaultYear()"
+        style="margin-top: 12px"
+        type="warning"
+        show-icon
+        title="当前导入模板未映射年份列，请在导入时设置默认年份。"
+        :closable="false"
+      />
     </el-card>
 
     <el-card class="card">
@@ -176,11 +234,24 @@ const handleContestFileChange = (file: UploadFile) => {
     </el-card>
   </div>
 
+  <el-dialog v-model="showYearDialog" title="设置默认年份" width="420px">
+    <el-form label-position="top">
+      <el-form-item label="默认年份">
+        <el-input v-model="yearDialogForm.year" placeholder="例如 2024" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showYearDialog = false">取消</el-button>
+      <el-button type="primary" @click="handleYearDialogConfirm">确认</el-button>
+    </template>
+  </el-dialog>
+
   <el-alert
     v-if="
       importRequest.error ||
       competitionImportRequest.error ||
-      contestImportRequest.error
+      contestImportRequest.error ||
+      templateRequest.error
     "
     class="card"
     style="margin-top: 24px"
@@ -189,7 +260,8 @@ const handleContestFileChange = (file: UploadFile) => {
     :title="
       importRequest.error ||
       competitionImportRequest.error ||
-      contestImportRequest.error
+      contestImportRequest.error ||
+      templateRequest.error
     "
     :closable="false"
   />

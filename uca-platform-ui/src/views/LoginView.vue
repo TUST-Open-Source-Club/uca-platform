@@ -31,7 +31,13 @@ const methods = [
 const availableMethods = ref<string[]>(['passkey', 'totp'])
 
 const rules = {
-  username: [{ required: true, message: '请输入学号/工号', trigger: 'blur' }],
+  username: [
+    {
+      required: () => form.method !== 'passkey',
+      message: '请输入学号/工号',
+      trigger: 'blur',
+    },
+  ],
   code: [
     {
       required: () => form.method === 'totp',
@@ -86,7 +92,7 @@ const handleLogin = async () => {
         if (!window.PublicKeyCredential) {
           throw new Error('当前浏览器不支持 Passkey')
         }
-        const data = await passkeyStart(form.username)
+        const data = await passkeyStart(form.username || undefined)
         const options = normalizeRequestOptions(
           data.public_key as unknown as PublicKeyCredentialRequestOptions,
         )

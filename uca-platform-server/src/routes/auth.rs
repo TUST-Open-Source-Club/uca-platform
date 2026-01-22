@@ -698,7 +698,7 @@ pub async fn passkey_register_finish(
 #[derive(Debug, Deserialize)]
 pub struct PasskeyLoginStartRequest {
     /// 待认证用户名。
-    pub username: String,
+    pub username: Option<String>,
 }
 
 /// Passkey 认证开始响应。
@@ -715,24 +715,51 @@ pub async fn passkey_login_start(
     State(state): State<AppState>,
     Json(payload): Json<PasskeyLoginStartRequest>,
 ) -> Result<Json<PasskeyLoginStartResponse>, AppError> {
-    let user = User::find()
-        .filter(users::Column::Username.eq(payload.username))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?
-        .ok_or_else(|| AppError::not_found("user not found"))?;
-    if !user.is_active {
-        return Err(AppError::auth("user disabled"));
-    }
-    if !user.is_active {
-        return Err(AppError::auth("user disabled"));
+    let (passkey_records, session_user_id) = if let Some(username) = payload.username {
+        let user = User::find()
+            .filter(users::Column::Username.eq(username))
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .ok_or_else(|| AppError::not_found("user not found"))?;
+        if !user.is_active {
+            return Err(AppError::auth("user disabled"));
+        }
+        let records = Passkey::find()
+            .filter(passkeys::Column::UserId.eq(user.id))
+            .all(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        (records, user.id)
+    } else {
+        let records = Passkey::find()
+            .all(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        (records, Uuid::nil())
+    };
+    if passkey_records.is_empty() {
+        return Err(AppError::bad_request("no passkeys registered"));
     }
 
-    let passkey_records = Passkey::find()
-        .filter(passkeys::Column::UserId.eq(user.id))
-        .all(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
+    let passkey_records = if session_user_id.is_nil() {
+        let user_ids: Vec<Uuid> = passkey_records.iter().map(|record| record.user_id).collect();
+        let active_users: std::collections::HashSet<Uuid> = User::find()
+            .filter(users::Column::Id.is_in(user_ids))
+            .filter(users::Column::IsActive.eq(true))
+            .all(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .into_iter()
+            .map(|user| user.id)
+            .collect();
+        passkey_records
+            .into_iter()
+            .filter(|record| active_users.contains(&record.user_id))
+            .collect::<Vec<_>>()
+    } else {
+        passkey_records
+    };
     if passkey_records.is_empty() {
         return Err(AppError::bad_request("no passkeys registered"));
     }
@@ -750,7 +777,7 @@ pub async fn passkey_login_start(
 
     let session_id = Uuid::new_v4();
     let session = PasskeyAuthSession {
-        user_id: user.id,
+        user_id: session_user_id,
         state: auth_state,
         created_at: OffsetDateTime::now_utc(),
     };
@@ -816,7 +843,7 @@ pub async fn passkey_login_finish(
     if stored_passkey.update_credential(&auth_result).unwrap_or(false) {
         let updated_json = serde_json::to_string(&stored_passkey)
             .map_err(|_| AppError::internal("failed to serialize passkey"))?;
-        let mut active: passkeys::ActiveModel = record.into();
+        let mut active: passkeys::ActiveModel = record.clone().into();
         active.passkey_json = Set(updated_json);
         active.last_used_at = Set(Some(Utc::now()));
         active
@@ -824,10 +851,11 @@ pub async fn passkey_login_finish(
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
     }
+    let record_user_id = record.user_id;
 
     let device = devices::ActiveModel {
         id: Set(Uuid::new_v4()),
-        user_id: Set(session.user_id),
+        user_id: Set(record_user_id),
         device_type: Set("passkey".to_string()),
         label: Set("Passkey".to_string()),
         credential_id: Set(Some(cred_id_b64.clone())),
@@ -836,7 +864,7 @@ pub async fn passkey_login_finish(
     };
 
     if let Some(existing) = Device::find()
-        .filter(devices::Column::UserId.eq(session.user_id))
+        .filter(devices::Column::UserId.eq(record_user_id))
         .filter(devices::Column::CredentialId.eq(Some(cred_id_b64)))
         .one(&state.db)
         .await
@@ -855,7 +883,7 @@ pub async fn passkey_login_finish(
             .map_err(|err| AppError::Database(err.to_string()))?;
     }
 
-    let user = User::find_by_id(session.user_id)
+    let user = User::find_by_id(record_user_id)
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
@@ -864,7 +892,7 @@ pub async fn passkey_login_finish(
         return Err(AppError::auth("user disabled"));
     }
 
-    let (jar, user_id) = create_session_cookie(&state, jar, session.user_id).await?;
+    let (jar, user_id) = create_session_cookie(&state, jar, record_user_id).await?;
 
     Ok((jar, Json(PasskeyLoginFinishResponse { user_id })))
 }

@@ -1412,6 +1412,8 @@ pub async fn import_contest_records(
             self_hours: Set(self_hours.unwrap_or(0)),
             first_review_hours: Set(first_review),
             final_review_hours: Set(final_review),
+            first_reviewer_id: Set(None),
+            final_reviewer_id: Set(None),
             status: Set(status),
             rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
             is_deleted: Set(false),

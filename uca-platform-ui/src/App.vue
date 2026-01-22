@@ -22,6 +22,7 @@ const navItems = computed(() => {
   if (auth.role === 'teacher' || auth.role === 'reviewer' || auth.role === 'admin') {
     items.push({ path: '/review', label: '审核中心' })
     items.push({ path: '/exports', label: '导出中心' })
+    items.push({ path: '/profile', label: '个人中心' })
   }
 
   if (auth.role === 'admin') {

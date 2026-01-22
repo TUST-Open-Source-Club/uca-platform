@@ -36,11 +36,15 @@ export async function queryStudents(filters: Record<string, unknown>): Promise<u
 export async function importStudents(
   file: File,
   fieldMap?: Record<string, string>,
+  allowLogin?: boolean,
 ): Promise<{ inserted: number; updated: number }> {
   const form = new FormData()
   form.append('file', file)
   if (fieldMap && Object.keys(fieldMap).length) {
     form.append('field_map', JSON.stringify(fieldMap))
+  }
+  if (allowLogin !== undefined) {
+    form.append('allow_login', allowLogin ? 'true' : 'false')
   }
   return requestMultipart('/students/import', form)
 }

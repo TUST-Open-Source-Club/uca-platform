@@ -452,6 +452,22 @@
 { "status": "ok" }
 ```
 
+### GET /profile/signature
+获取当前用户签名图片状态（审核/管理员/教师）。
+
+响应：
+```json
+{ "uploaded": true, "signature_path": "data/uploads/signatures/users/<user_id>/signature_20250101.png" }
+```
+
+### POST /profile/signature
+上传当前用户签名图片（审核/管理员/教师，multipart 字段 `file`）。
+
+响应：
+```json
+{ "uploaded": true, "signature_path": "data/uploads/signatures/users/<user_id>/signature_20250101.png" }
+```
+
 ## 学生接口
 
 ### POST /students
@@ -534,6 +550,7 @@
 请求： `multipart/form-data`
 - `file`：腾讯文档导出的 `.xlsx` 文件
 - `field_map`（可选）：JSON 字符串，指定字段到列的映射
+- `allow_login`（可选）：`true/false`，是否允许学生登录（默认 `false`）
 
 响应：
 ```json
@@ -547,6 +564,11 @@
   "name": "B",
   "major": "专业"
 }
+```
+
+`allow_login` 示例：
+```
+allow_login=true
 ```
 
 标准表头（学生导入）：

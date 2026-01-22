@@ -27,10 +27,11 @@ export type ReauthTokenResponse = {
 
 const reauthHeaders = (token?: string) => (token ? { 'X-Reauth-Token': token } : undefined)
 
-export async function passkeyStart(username: string): Promise<PasskeyStartResponse> {
+export async function passkeyStart(username?: string): Promise<PasskeyStartResponse> {
+  const payload = username ? { username } : {}
   return requestJson('/auth/passkey/login/start', {
     method: 'POST',
-    body: JSON.stringify({ username }),
+    body: JSON.stringify(payload),
   })
 }
 

@@ -19,6 +19,8 @@ pub struct Model {
     pub self_hours: i32,
     pub first_review_hours: Option<i32>,
     pub final_review_hours: Option<i32>,
+    pub first_reviewer_id: Option<Uuid>,
+    pub final_reviewer_id: Option<Uuid>,
     pub status: String,
     pub rejection_reason: Option<String>,
     pub is_deleted: bool,

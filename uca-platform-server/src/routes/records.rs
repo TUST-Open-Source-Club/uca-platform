@@ -184,6 +184,8 @@ pub async fn create_contest_record(
         self_hours: Set(payload.self_hours),
         first_review_hours: Set(None),
         final_review_hours: Set(None),
+        first_reviewer_id: Set(None),
+        final_reviewer_id: Set(None),
         status: Set(STATUS_SUBMITTED.to_string()),
         rejection_reason: Set(None),
         is_deleted: Set(false),
@@ -219,6 +221,8 @@ pub async fn create_contest_record(
         self_hours: payload.self_hours,
         first_review_hours: None,
         final_review_hours: None,
+        first_reviewer_id: None,
+        final_reviewer_id: None,
         status: STATUS_SUBMITTED.to_string(),
         rejection_reason: None,
         is_deleted: false,
@@ -319,8 +323,10 @@ pub async fn review_contest_record(
     apply_review_update(&payload, &mut active.status, &mut active.rejection_reason)?;
     if payload.stage == REVIEW_STAGE_FIRST {
         active.first_review_hours = Set(Some(payload.hours));
+        active.first_reviewer_id = Set(Some(user.id));
     } else {
         active.final_review_hours = Set(Some(payload.hours));
+        active.final_reviewer_id = Set(Some(user.id));
     }
     active.updated_at = Set(Utc::now());
 
@@ -669,6 +675,8 @@ mod tests {
             self_hours: 3,
             first_review_hours: None,
             final_review_hours: None,
+            first_reviewer_id: None,
+            final_reviewer_id: None,
             status: STATUS_SUBMITTED.to_string(),
             rejection_reason: None,
             is_deleted: false,

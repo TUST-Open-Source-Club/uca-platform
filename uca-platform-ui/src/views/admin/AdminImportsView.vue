@@ -13,6 +13,7 @@ const competitionImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
 const result = ref('')
 
+const allowStudentLogin = ref(false)
 const showStudentDialog = ref(false)
 const showCompetitionDialog = ref(false)
 const showContestDialog = ref(false)
@@ -84,7 +85,11 @@ const handleImport = async () => {
     if (!valid) return
     await importRequest.run(
       async () => {
-        const data = await importStudents(importFile.value as File, buildFieldMap(studentFieldMap.value))
+        const data = await importStudents(
+          importFile.value as File,
+          buildFieldMap(studentFieldMap.value),
+          allowStudentLogin.value,
+        )
         result.value = JSON.stringify(data, null, 2)
       },
       { successMessage: '已上传学生名单' },
@@ -218,6 +223,12 @@ onMounted(() => {
             上传名单
           </el-button>
         </div>
+        <el-switch
+          v-model="allowStudentLogin"
+          active-text="允许学生登录"
+          inactive-text="禁止学生登录"
+          style="margin-top: 12px"
+        />
       </el-form>
     </el-card>
 

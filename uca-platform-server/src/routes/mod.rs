@@ -11,6 +11,7 @@ pub mod exports;
 pub mod students;
 pub mod records;
 pub mod forms;
+pub mod profile;
 
 /// 构建应用路由。
 pub fn router(state: AppState) -> Router {
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/reset/consume", post(auth::reset_consume))
         .route("/auth/devices", get(auth::list_devices))
         .route("/auth/devices/:device_id", delete(auth::delete_device))
+        .route("/profile/signature", get(profile::get_signature).post(profile::upload_signature))
         .route("/forms/:form_type/fields", get(forms::list_form_fields_for_type))
         .route("/competitions", get(admin::list_competitions_public))
         .route("/students", post(students::create_student))

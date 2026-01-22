@@ -138,7 +138,7 @@ pub async fn create_student(
                 .update(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&state.db, &payload.student_no, &payload.name).await?;
+            upsert_student_user(&state.db, &payload.student_no, &payload.name, true).await?;
             return Ok(Json(StudentResponse::from(model)));
         }
         return Err(AppError::bad_request("student number exists"));
@@ -164,7 +164,7 @@ pub async fn create_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    upsert_student_user(&state.db, &payload.student_no, &payload.name).await?;
+    upsert_student_user(&state.db, &payload.student_no, &payload.name, true).await?;
 
     let model = students::Model {
         id,
@@ -217,7 +217,7 @@ pub async fn update_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    upsert_student_user(&state.db, &student_no, &payload.name).await?;
+    upsert_student_user(&state.db, &student_no, &payload.name, true).await?;
 
     Ok(Json(StudentResponse::from(model)))
 }
@@ -286,6 +286,10 @@ pub async fn import_students(
         .map(|value| serde_json::from_str::<HashMap<String, String>>(value))
         .transpose()
         .map_err(|_| AppError::bad_request("invalid field_map"))?;
+    let allow_login = fields
+        .get("allow_login")
+        .map(|value| value == "true" || value == "1")
+        .unwrap_or(false);
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
     let sheet_name = workbook
@@ -343,7 +347,7 @@ pub async fn import_students(
                 .update(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&transaction, &student_no, &name).await?;
+            upsert_student_user(&transaction, &student_no, &name, allow_login).await?;
             updated += 1;
         } else {
             let model = students::ActiveModel {
@@ -363,7 +367,7 @@ pub async fn import_students(
                 .exec_without_returning(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&transaction, &student_no, &name).await?;
+            upsert_student_user(&transaction, &student_no, &name, allow_login).await?;
             inserted += 1;
         }
     }
@@ -490,6 +494,7 @@ async fn upsert_student_user<C>(
     db: &C,
     student_no: &str,
     name: &str,
+    allow_login: bool,
 ) -> Result<(), AppError>
 where
     C: ConnectionTrait,
@@ -510,7 +515,7 @@ where
         if missing_password {
             active.password_hash = Set(Some(default_hash));
         }
-        active.allow_password_login = Set(true);
+        active.allow_password_login = Set(allow_login);
         active.updated_at = Set(now);
         active
             .update(db)
@@ -526,7 +531,7 @@ where
         role: Set("student".to_string()),
         email: Set(None),
         password_hash: Set(Some(default_hash)),
-        allow_password_login: Set(true),
+        allow_password_login: Set(allow_login),
         password_updated_at: Set(Some(now)),
         is_active: Set(true),
         created_at: Set(now),

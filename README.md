@@ -37,6 +37,8 @@
 - `total_reason` 不通过原因汇总
 - `first_signature_path` 初审教师签名路径（文本）
 - `final_signature_path` 复审教师签名路径（文本）
+- `first_signature_image` 初审电子签名图片（替换为图片）
+- `final_signature_image` 复审电子签名图片（替换为图片）
 
 列表字段（用于 `{{list:字段}}`）：
 - `seq` 序号（从 1 递增）
@@ -55,6 +57,10 @@
 - `status` 审核状态
 - `rejection_reason` 不通过原因
 - `custom.<字段Key>` 竞赛自定义字段（例如：`custom.sponsor`）
+
+### 个人中心签名
+
+审核人员/管理员可在“个人中心”上传签名图片，用于导出 PDF 中的 `first_signature_image`/`final_signature_image` 占位符。
 
 ### LibreOffice 依赖
 

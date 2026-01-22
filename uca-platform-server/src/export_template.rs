@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
+use umya_spreadsheet::structs::drawing::spreadsheet::MarkerType;
+use umya_spreadsheet::structs::Image;
 use umya_spreadsheet::Spreadsheet;
 
 use crate::error::AppError;
@@ -190,12 +192,19 @@ fn apply_single_placeholders(
                 if placeholder.starts_with("list:") || placeholder == "/list" {
                     continue;
                 }
-                let replace = single_values
-                    .get(&placeholder)
-                    .cloned()
-                    .unwrap_or_default();
-                let token = format!("{{{{{placeholder}}}}}");
-                updated = updated.replace(&token, &replace);
+                if placeholder == "first_signature_image" || placeholder == "final_signature_image" {
+                    let path = single_values.get(&placeholder).cloned().unwrap_or_default();
+                    insert_signature_image(sheet, cell.column, cell.row, &path)?;
+                    let token = format!("{{{{{placeholder}}}}}");
+                    updated = updated.replace(&token, "");
+                } else {
+                    let replace = single_values
+                        .get(&placeholder)
+                        .cloned()
+                        .unwrap_or_default();
+                    let token = format!("{{{{{placeholder}}}}}");
+                    updated = updated.replace(&token, &replace);
+                }
             }
             if updated != value {
                 set_cell_value(sheet, cell.column, cell.row, &updated);
@@ -278,6 +287,28 @@ fn set_cell_value(sheet: &mut umya_spreadsheet::Worksheet, column: u32, row: u32
     cell.set_value(value);
 }
 
+fn insert_signature_image(
+    sheet: &mut umya_spreadsheet::Worksheet,
+    column: u32,
+    row: u32,
+    path: &str,
+) -> Result<(), AppError> {
+    if path.trim().is_empty() {
+        return Ok(());
+    }
+    let path_obj = std::path::Path::new(path);
+    if !path_obj.exists() {
+        return Ok(());
+    }
+    let coord = format!("{}{}", column_label(column), row);
+    let mut marker = MarkerType::default();
+    marker.set_coordinate(coord.as_str());
+    let mut image = Image::default();
+    image.new_image(path, marker);
+    sheet.add_image(image);
+    Ok(())
+}
+
 fn extract_placeholders(value: &str) -> Vec<String> {
     let mut placeholders = Vec::new();
     let mut start = 0usize;
@@ -321,6 +352,8 @@ fn allowed_single_placeholders() -> HashSet<String> {
         "total_reason",
         "first_signature_path",
         "final_signature_path",
+        "first_signature_image",
+        "final_signature_image",
     ]
     .iter()
     .map(|value| value.to_string())
@@ -359,11 +392,18 @@ fn is_allowed_list_field(allowed: &HashSet<String>, field_key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::allowed_list_placeholders;
+    use super::{allowed_list_placeholders, allowed_single_placeholders};
 
     #[test]
     fn list_placeholders_include_seq() {
         let allowed = allowed_list_placeholders();
         assert!(allowed.contains("seq"));
+    }
+
+    #[test]
+    fn single_placeholders_include_signature_images() {
+        let allowed = allowed_single_placeholders();
+        assert!(allowed.contains("first_signature_image"));
+        assert!(allowed.contains("final_signature_image"));
     }
 }

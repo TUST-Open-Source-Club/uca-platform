@@ -19,7 +19,7 @@ use crate::{
     access::require_session_user,
     entities::{
         contest_records, form_field_values, form_fields, review_signatures, students,
-        ContestRecord, FormField, FormFieldValue, ReviewSignature, Student,
+        ContestRecord, FormField, FormFieldValue, ReviewSignature, Student, UserSignature,
     },
     error::AppError,
     export_template::render_template_to_xlsx,
@@ -481,7 +481,7 @@ pub async fn export_labor_hours_pdf(
         compute_student_hours(&state, student.id).await?;
 
     let rule_config = load_labor_hour_rules(&state).await?;
-    let signature_bundle = load_latest_signatures(&state, &record_ids).await?;
+    let signature_bundle = load_reviewer_signatures(&state, &records).await?;
 
     let template_path = export_template_file_path(&state, "labor_hours");
     if !template_path.exists() {
@@ -545,49 +545,56 @@ struct SignatureBundle {
     final_review: Option<String>,
 }
 
-async fn load_latest_signatures(
+async fn load_reviewer_signatures(
     state: &AppState,
-    record_ids: &[Uuid],
+    records: &[contest_records::Model],
 ) -> Result<SignatureBundle, AppError> {
-    if record_ids.is_empty() {
-        return Ok(SignatureBundle {
-            first: None,
-            final_review: None,
-        });
-    }
+    let mut first: Option<(chrono::DateTime<chrono::Utc>, Uuid)> = None;
+    let mut final_review: Option<(chrono::DateTime<chrono::Utc>, Uuid)> = None;
 
-    let signatures = ReviewSignature::find()
-        .filter(review_signatures::Column::RecordType.eq("contest"))
-        .filter(review_signatures::Column::RecordId.is_in(record_ids.iter().cloned()))
-        .all(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let mut first: Option<(chrono::DateTime<chrono::Utc>, String)> = None;
-    let mut final_review: Option<(chrono::DateTime<chrono::Utc>, String)> = None;
-    for sig in signatures {
-        if sig.stage == "first" {
+    for record in records {
+        if let Some(user_id) = record.first_reviewer_id {
             let replace = first
                 .as_ref()
-                .map(|(time, _)| sig.created_at > *time)
+                .map(|(time, _)| record.updated_at > *time)
                 .unwrap_or(true);
             if replace {
-                first = Some((sig.created_at, sig.signature_path));
+                first = Some((record.updated_at, user_id));
             }
-        } else if sig.stage == "final" {
+        }
+        if let Some(user_id) = record.final_reviewer_id {
             let replace = final_review
                 .as_ref()
-                .map(|(time, _)| sig.created_at > *time)
+                .map(|(time, _)| record.updated_at > *time)
                 .unwrap_or(true);
             if replace {
-                final_review = Some((sig.created_at, sig.signature_path));
+                final_review = Some((record.updated_at, user_id));
             }
         }
     }
 
+    let first_path = if let Some((_, user_id)) = first {
+        UserSignature::find_by_id(user_id)
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .map(|model| model.signature_path)
+    } else {
+        None
+    };
+    let final_path = if let Some((_, user_id)) = final_review {
+        UserSignature::find_by_id(user_id)
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .map(|model| model.signature_path)
+    } else {
+        None
+    };
+
     Ok(SignatureBundle {
-        first: first.map(|(_, path)| path),
-        final_review: final_review.map(|(_, path)| path),
+        first: first_path,
+        final_review: final_path,
     })
 }
 
@@ -611,9 +618,11 @@ fn build_single_values(
     values.insert("total_reason".to_string(), reason.to_string());
     if let Some(path) = signatures.first.as_ref() {
         values.insert("first_signature_path".to_string(), path.clone());
+        values.insert("first_signature_image".to_string(), path.clone());
     }
     if let Some(path) = signatures.final_review.as_ref() {
         values.insert("final_signature_path".to_string(), path.clone());
+        values.insert("final_signature_image".to_string(), path.clone());
     }
     values
 }

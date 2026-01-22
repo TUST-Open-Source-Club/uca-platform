@@ -26,6 +26,7 @@ import TwoFactorView from '../views/TwoFactorView.vue'
 import PurgeView from '../views/PurgeView.vue'
 import PublicCompetitionsView from '../views/PublicCompetitionsView.vue'
 import SetupView from '../views/SetupView.vue'
+import ProfileView from '../views/ProfileView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -44,6 +45,7 @@ const router = createRouter({
     { path: '/student', component: StudentDashboard },
     { path: '/records', component: RecordsView },
     { path: '/review', component: ReviewDashboard },
+    { path: '/profile', component: ProfileView },
     { path: '/admin', component: AdminHomeView },
     { path: '/admin/home', component: AdminDashboard },
     { path: '/admin/imports', component: AdminImportsView },

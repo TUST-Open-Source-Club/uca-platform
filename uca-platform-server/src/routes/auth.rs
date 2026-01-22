@@ -915,6 +915,9 @@ pub async fn password_reset_request(
     State(state): State<AppState>,
     Json(payload): Json<PasswordResetRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    if matches!(state.config.reset_delivery, crate::config::ResetDelivery::Code) {
+        return Err(AppError::bad_request("reset delivery set to code"));
+    }
     let user = User::find()
         .filter(users::Column::Username.eq(payload.username))
         .one(&state.db)

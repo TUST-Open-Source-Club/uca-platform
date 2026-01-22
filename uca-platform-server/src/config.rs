@@ -50,6 +50,22 @@ pub struct Config {
     pub mail: Option<MailConfig>,
     /// 学生密码策略。
     pub password_policy: PasswordPolicy,
+    /// 重置凭证交付方式（email/code）。
+    pub reset_delivery: ResetDelivery,
+}
+
+/// 重置凭证交付方式。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResetDelivery {
+    Email,
+    Code,
+}
+
+impl Default for ResetDelivery {
+    fn default() -> Self {
+        Self::Email
+    }
 }
 
 /// 邮件发送配置。
@@ -116,6 +132,7 @@ struct ConfigFile {
     session_ttl_seconds: Option<i64>,
     mail: Option<MailConfig>,
     password_policy: Option<PasswordPolicyFile>,
+    reset_delivery: Option<ResetDelivery>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,6 +275,11 @@ impl Config {
         };
         let mail = load_mail_config(file_ref)?;
         let password_policy = load_password_policy(file_ref);
+        let reset_delivery = env::var("RESET_DELIVERY")
+            .ok()
+            .and_then(|value| parse_reset_delivery(&value))
+            .or_else(|| file_ref.and_then(|cfg| cfg.reset_delivery.clone()))
+            .unwrap_or_default();
 
         Ok(Self {
             bind_addr,
@@ -279,7 +301,16 @@ impl Config {
             bootstrap_token,
             mail,
             password_policy,
+            reset_delivery,
         })
+    }
+}
+
+fn parse_reset_delivery(value: &str) -> Option<ResetDelivery> {
+    match value.to_lowercase().as_str() {
+        "email" => Some(ResetDelivery::Email),
+        "code" => Some(ResetDelivery::Code),
+        _ => None,
     }
 }
 

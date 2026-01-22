@@ -6,6 +6,7 @@ import ExportView from '../views/ExportView.vue'
 import LoginView from '../views/LoginView.vue'
 import InviteView from '../views/InviteView.vue'
 import ResetView from '../views/ResetView.vue'
+import ResetCodeView from '../views/ResetCodeView.vue'
 import PasswordResetRequestView from '../views/PasswordResetRequestView.vue'
 import PasswordResetView from '../views/PasswordResetView.vue'
 import RecordsView from '../views/RecordsView.vue'
@@ -25,6 +26,7 @@ const router = createRouter({
     { path: '/setup', component: SetupView },
     { path: '/invite', component: InviteView },
     { path: '/reset', component: ResetView },
+    { path: '/reset-code', component: ResetCodeView },
     { path: '/password-reset/request', component: PasswordResetRequestView },
     { path: '/password-reset', component: PasswordResetView },
     { path: '/2fa', component: TwoFactorView },
@@ -48,6 +50,7 @@ router.beforeEach(async (to) => {
     '/setup',
     '/invite',
     '/reset',
+    '/reset-code',
     '/password-reset',
     '/password-reset/request',
   ]

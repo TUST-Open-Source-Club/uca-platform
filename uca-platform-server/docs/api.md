@@ -38,6 +38,7 @@
 - 默认数据库为 `sqlite://data/dev.db?mode=rwc`，默认 RP 信息为 `localhost`/`http://localhost:8443`。
 - 若启用 `ALLOW_HTTP=true`，服务以 HTTP 启动，HTTPS 交由反向代理处理。
 - 开发者模式会忽略环境变量配置，强制使用默认值。
+- `RESET_DELIVERY` 或配置文件 `reset_delivery` 可选值：`email` 或 `code`。
 
 ## 认证接口
 
@@ -272,7 +273,7 @@
 ```
 
 ### POST /auth/password/reset/request
-学生发起密码重置邮件（无需登录，需先绑定邮箱）。
+学生发起密码重置邮件（无需登录，需先绑定邮箱）。当 `reset_delivery=code` 时该接口不可用。
 
 请求：
 ```json
@@ -285,7 +286,7 @@
 ```
 
 ### POST /auth/password/reset/confirm
-完成学生密码重置（无需登录）。
+完成学生密码重置（无需登录，可来自邮件链接或一次性重置码）。
 
 请求：
 ```json
@@ -748,6 +749,24 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 响应：
 ```json
 { "status": "ok" }
+```
+
+### POST /admin/users/reset/code
+生成一次性重置码（仅内网模式，需会话 Cookie）。
+
+说明：
+- `purpose=password` 仅学生可用。
+- `purpose=totp/passkey` 仅非学生可用。
+- 当 `reset_delivery=email` 时该接口不可用。
+
+请求：
+```json
+{ "username": "teacher001", "purpose": "totp" }
+```
+
+响应：
+```json
+{ "code": "ABCD1234", "expires_in_minutes": 30 }
 ```
 
 ### GET /admin/competitions

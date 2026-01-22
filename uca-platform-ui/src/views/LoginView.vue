@@ -205,6 +205,9 @@ const handleLogin = async () => {
     <p style="margin-top: 12px">
       <router-link to="/password-reset/request">学生忘记密码？</router-link>
     </p>
+    <p>
+      <router-link to="/reset-code">使用一次性重置码</router-link>
+    </p>
     <pre v-if="result">{{ result }}</pre>
   </el-card>
 

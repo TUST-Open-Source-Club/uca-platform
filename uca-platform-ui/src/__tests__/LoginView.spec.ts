@@ -18,6 +18,7 @@ describe('LoginView', () => {
       routes: [
         { path: '/', component: { template: '<div />' } },
         { path: '/password-reset/request', component: { template: '<div />' } },
+        { path: '/reset-code', component: { template: '<div />' } },
       ],
     })
     const ElTableStub = defineComponent({

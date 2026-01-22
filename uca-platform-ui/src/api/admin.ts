@@ -130,3 +130,13 @@ export async function resetUserPasskey(username: string): Promise<{ status: stri
     body: JSON.stringify({ username }),
   })
 }
+
+export async function generateResetCode(payload: {
+  username: string
+  purpose: 'password' | 'totp' | 'passkey'
+}): Promise<{ code?: string; expires_in_minutes: number }> {
+  return requestJson('/admin/users/reset/code', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}

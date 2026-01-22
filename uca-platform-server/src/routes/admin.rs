@@ -95,6 +95,23 @@ pub struct ResetUserRequest {
     pub username: String,
 }
 
+/// 生成一次性重置码请求。
+#[derive(Debug, Deserialize)]
+pub struct ResetCodeRequest {
+    pub username: String,
+    /// 重置目的（password/totp/passkey）。
+    pub purpose: String,
+}
+
+/// 一次性重置码响应。
+#[derive(Debug, Serialize)]
+pub struct ResetCodeResponse {
+    /// 重置码（仅在 code 模式返回）。
+    pub code: Option<String>,
+    /// 过期分钟数。
+    pub expires_in_minutes: i64,
+}
+
 const INVITE_TTL_HOURS: i64 = 72;
 const RESET_TTL_MINUTES: i64 = 30;
 
@@ -391,6 +408,9 @@ pub async fn reset_user_totp(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let admin = require_session_user(&state, &jar).await?;
     require_role(&admin, "admin")?;
+    if matches!(state.config.reset_delivery, crate::config::ResetDelivery::Code) {
+        return Err(AppError::bad_request("reset delivery set to code"));
+    }
 
     let user = User::find()
         .filter(users::Column::Username.eq(payload.username))
@@ -448,6 +468,9 @@ pub async fn reset_user_passkey(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let admin = require_session_user(&state, &jar).await?;
     require_role(&admin, "admin")?;
+    if matches!(state.config.reset_delivery, crate::config::ResetDelivery::Code) {
+        return Err(AppError::bad_request("reset delivery set to code"));
+    }
 
     let user = User::find()
         .filter(users::Column::Username.eq(payload.username))
@@ -495,6 +518,60 @@ pub async fn reset_user_passkey(
     );
     send_mail(mail_config, &email, "Passkey 重置", &body).await?;
     Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+/// 生成一次性重置码（仅内网模式）。
+pub async fn generate_reset_code(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<ResetCodeRequest>,
+) -> Result<Json<ResetCodeResponse>, AppError> {
+    let admin = require_session_user(&state, &jar).await?;
+    require_role(&admin, "admin")?;
+    if matches!(state.config.reset_delivery, crate::config::ResetDelivery::Email) {
+        return Err(AppError::bad_request("reset delivery set to email"));
+    }
+
+    let user = User::find()
+        .filter(users::Column::Username.eq(&payload.username))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+
+    let purpose = payload.purpose.as_str();
+    if purpose == "password" && user.role != "student" {
+        return Err(AppError::bad_request("password reset only for students"));
+    }
+    if (purpose == "totp" || purpose == "passkey") && user.role == "student" {
+        return Err(AppError::bad_request("student reset via password"));
+    }
+    if !matches!(purpose, "password" | "totp" | "passkey") {
+        return Err(AppError::validation("invalid reset purpose"));
+    }
+
+    let token = generate_token();
+    let token_hash = hash_token(&token);
+    let now = Utc::now();
+    let expires_at = now + ChronoDuration::minutes(RESET_TTL_MINUTES);
+    let reset = auth_resets::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        token_hash: Set(token_hash),
+        user_id: Set(user.id),
+        purpose: Set(purpose.to_string()),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+        used_at: Set(None),
+    };
+    auth_resets::Entity::insert(reset)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(ResetCodeResponse {
+        code: Some(token),
+        expires_in_minutes: RESET_TTL_MINUTES,
+    }))
 }
 
 /// 从 Excel 导入竞赛名称（仅管理员）。

@@ -80,6 +80,7 @@ vi.mock('../api/admin', () => ({
   }),
   resetUserTotp: vi.fn().mockResolvedValue({ status: 'ok' }),
   resetUserPasskey: vi.fn().mockResolvedValue({ status: 'ok' }),
+  generateResetCode: vi.fn().mockResolvedValue({ code: 'RESET123', expires_in_minutes: 30 }),
 }))
 
 vi.mock('../api/exports', () => ({

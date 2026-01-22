@@ -122,7 +122,12 @@ Implement the core backend + frontend skeleton for the VolunteerHours system bas
 - 学生默认密码为 st+学号（按密码策略生成与校验）。
 - 学生允许密码登录，支持绑定邮箱后自助重置密码。
 - 非学生仅允许管理员发起 TOTP/Passkey 重置邀请。
- - 进度：后端/前端已实现（含管理员密码策略配置与重置页面）。
+- 进度：后端/前端已实现（含管理员密码策略配置与重置页面）。
+
+4) 一次性重置码（内网模式）
+- 管理员可生成一次性重置码，用于学生密码或非学生 TOTP/Passkey 重置。
+- 由配置项 `reset_delivery` 控制使用邮件或重置码。
+ - 进度：后端/前端已实现（含重置码入口页面与管理端生成）。
 
 ## Verification
 - Frontend: pnpm test:unit

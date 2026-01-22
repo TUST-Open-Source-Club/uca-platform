@@ -73,6 +73,7 @@ const buildRouter = () =>
       { path: '/review', component: { template: '<div />' } },
       { path: '/admin', component: { template: '<div />' } },
       { path: '/password-reset/request', component: { template: '<div />' } },
+      { path: '/reset-code', component: { template: '<div />' } },
     ],
   })
 

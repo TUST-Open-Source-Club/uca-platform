@@ -9,6 +9,7 @@ import {
   deleteContestRecord,
   deleteStudent,
   deleteVolunteerRecord,
+  generateResetCode,
   getPasswordPolicy,
   importCompetitions,
   importContestRecords,
@@ -52,6 +53,7 @@ const listDataRequest = useRequest()
 const userRequest = useRequest()
 const policyRequest = useRequest()
 const resetRequest = useRequest()
+const resetCodeRequest = useRequest()
 const router = useRouter()
 
 const competitionForm = reactive({
@@ -101,6 +103,11 @@ const passwordPolicyForm = reactive({
 const resetForm = reactive({
   username: '',
   method: 'totp',
+})
+
+const resetCodeForm = reactive({
+  username: '',
+  purpose: 'password',
 })
 
 const competitionRules = {
@@ -351,6 +358,16 @@ const handleResetAuth = async () => {
       await resetUserPasskey(resetForm.username)
     }
   }, { successMessage: '重置链接已发送' })
+}
+
+const handleResetCode = async () => {
+  await resetCodeRequest.run(async () => {
+    const data = await generateResetCode({
+      username: resetCodeForm.username,
+      purpose: resetCodeForm.purpose as 'password' | 'totp' | 'passkey',
+    })
+    result.value = JSON.stringify(data, null, 2)
+  }, { successMessage: '重置码已生成' })
 }
 </script>
 
@@ -655,6 +672,26 @@ const handleResetAuth = async () => {
         </el-button>
       </el-form>
     </el-card>
+
+    <el-card class="card">
+      <h3>生成一次性重置码</h3>
+      <el-form :model="resetCodeForm" label-position="top">
+        <el-form-item label="用户名">
+          <el-input v-model="resetCodeForm.username" placeholder="学号或工号" />
+        </el-form-item>
+        <el-form-item label="重置类型">
+          <el-select v-model="resetCodeForm.purpose">
+            <el-option label="学生密码" value="password" />
+            <el-option label="TOTP" value="totp" />
+            <el-option label="Passkey" value="passkey" />
+          </el-select>
+        </el-form-item>
+        <el-button type="primary" :loading="resetCodeRequest.loading" @click="handleResetCode">
+          生成重置码
+        </el-button>
+      </el-form>
+      <p style="margin-top: 8px; color: var(--muted)">重置码仅可使用一次，泄露后请重新生成。</p>
+    </el-card>
   </div>
 
   <el-alert
@@ -670,7 +707,8 @@ const handleResetAuth = async () => {
       listDataRequest.error ||
       userRequest.error ||
       policyRequest.error ||
-      resetRequest.error
+      resetRequest.error ||
+      resetCodeRequest.error
     "
     class="card"
     style="margin-top: 24px"
@@ -688,7 +726,8 @@ const handleResetAuth = async () => {
       listDataRequest.error ||
       userRequest.error ||
       policyRequest.error ||
-      resetRequest.error
+      resetRequest.error ||
+      resetCodeRequest.error
     "
     :closable="false"
   />

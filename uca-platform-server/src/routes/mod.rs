@@ -63,6 +63,7 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/users", post(admin::create_user))
         .route("/admin/users/reset/totp", post(admin::reset_user_totp))
         .route("/admin/users/reset/passkey", post(admin::reset_user_passkey))
+        .route("/admin/users/reset/code", post(admin::generate_reset_code))
         .route("/admin/password-policy", get(admin::get_password_policy))
         .route("/admin/password-policy", post(admin::update_password_policy))
         .route("/admin/form-fields", get(admin::list_form_fields))

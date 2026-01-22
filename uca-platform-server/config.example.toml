@@ -54,3 +54,6 @@
 # require_lowercase = false
 # require_digit = true
 # require_symbol = false
+
+# 重置凭证交付方式（email/code）
+# reset_delivery = "email"

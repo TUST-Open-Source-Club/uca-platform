@@ -5,7 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import StudentDashboard from '../views/StudentDashboard.vue'
 import RecordsView from '../views/RecordsView.vue'
 import ReviewDashboard from '../views/ReviewDashboard.vue'
-import AdminDashboard from '../views/AdminDashboard.vue'
+import AdminHomeView from '../views/admin/AdminHomeView.vue'
 import ExportView from '../views/ExportView.vue'
 import DevicesView from '../views/DevicesView.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
@@ -137,14 +137,14 @@ describe('Views', () => {
     expect(wrapper.text()).toContain('审核中心')
   })
 
-  it('renders admin dashboard', () => {
+  it('renders admin home view', () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
     })
-    const wrapper = mount(AdminDashboard, { global: { stubs, plugins: [createPinia(), router] } })
+    const wrapper = mount(AdminHomeView, { global: { stubs, plugins: [createPinia(), router] } })
     expect(wrapper.text()).toContain('管理台')
-    expect(wrapper.text()).toContain('竞赛名称库导入')
+    expect(wrapper.text()).toContain('数据导入')
   })
 
   it('renders export view', () => {

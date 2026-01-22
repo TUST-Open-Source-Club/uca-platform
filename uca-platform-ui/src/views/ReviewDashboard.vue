@@ -70,11 +70,11 @@ const handleReview = async () => {
 
 const handleSignatureUpload = async () => {
   if (!form.value.recordId) {
-    signatureRequest.error.value = '请先填写记录 ID'
+    signatureRequest.error = '请先填写记录 ID'
     return
   }
   if (!signatureFile.value) {
-    signatureRequest.error.value = '请选择签名文件'
+    signatureRequest.error = '请选择签名文件'
     return
   }
   result.value = ''

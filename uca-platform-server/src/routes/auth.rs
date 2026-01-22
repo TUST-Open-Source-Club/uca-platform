@@ -417,8 +417,14 @@ pub async fn reauth_passkey_start(
 /// 完成 Passkey 二次验证。
 pub async fn reauth_passkey_finish(
     State(state): State<AppState>,
-    Json(payload): Json<PasskeyLoginFinishRequest>,
+    body: Bytes,
 ) -> Result<Json<ReauthTokenResponse>, AppError> {
+    let payload = if body.is_empty() {
+        return Err(AppError::bad_request("missing json payload"));
+    } else {
+        serde_json::from_slice::<PasskeyLoginFinishRequest>(&body)
+            .map_err(|_| AppError::bad_request("invalid json payload"))?
+    };
     let session = state
         .reauth_passkey_state
         .lock()
@@ -537,8 +543,14 @@ pub struct PasskeyRegisterStartResponse {
 pub async fn passkey_register_start(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(payload): Json<PasskeyRegisterStartRequest>,
+    body: Bytes,
 ) -> Result<Json<PasskeyRegisterStartResponse>, AppError> {
+    let payload = if body.is_empty() {
+        return Err(AppError::bad_request("missing json payload"));
+    } else {
+        serde_json::from_slice::<PasskeyRegisterStartRequest>(&body)
+            .map_err(|_| AppError::bad_request("invalid json payload"))?
+    };
     let user = require_session(&state, &jar).await?;
     if user.username != payload.username {
         return Err(AppError::auth("forbidden"));
@@ -611,8 +623,14 @@ pub struct PasskeyRegisterFinishResponse {
 pub async fn passkey_register_finish(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<PasskeyRegisterFinishRequest>,
+    body: Bytes,
 ) -> Result<Json<PasskeyRegisterFinishResponse>, AppError> {
+    let payload = if body.is_empty() {
+        return Err(AppError::bad_request("missing json payload"));
+    } else {
+        serde_json::from_slice::<PasskeyRegisterFinishRequest>(&body)
+            .map_err(|_| AppError::bad_request("invalid json payload"))?
+    };
     let session = state
         .passkey_state
         .lock()

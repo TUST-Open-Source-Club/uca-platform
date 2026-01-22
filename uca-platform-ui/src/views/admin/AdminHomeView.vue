@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+
 const sections = [
   { title: '数据导入', desc: '学生名单、竞赛库与记录导入。', path: '/admin/imports' },
   { title: '竞赛库管理', desc: '新增/查看竞赛名称库。', path: '/admin/competitions' },
@@ -21,7 +22,7 @@ const go = (path: string) => {
 <template>
   <section class="hero">
     <h1>管理台</h1>
-    <p>请选择需要的管理功能。</p>
+    <p>按功能进入具体管理页面。</p>
   </section>
 
   <div class="card-grid">

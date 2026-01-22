@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { proxyRefs, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 export function normalizeError(err: unknown): string {
@@ -38,5 +38,5 @@ export function useRequest() {
     }
   }
 
-  return { loading, error, run }
+  return proxyRefs({ loading, error, run })
 }

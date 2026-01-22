@@ -10,9 +10,9 @@ import { credentialToJson, normalizeRequestOptions } from '../utils/webauthn'
 const formRef = ref()
 const result = ref('')
 const router = useRouter()
-const request = useRequest()
-const optionsRequest = useRequest()
-const competitionsRequest = useRequest()
+const { loading: requestLoading, error: requestError, run: runRequest } = useRequest()
+const { run: runOptions } = useRequest()
+const { loading: competitionsLoading, error: competitionsError, run: runCompetitions } = useRequest()
 const competitions = ref<{ id: string; name: string }[]>([])
 
 const form = reactive({
@@ -50,7 +50,7 @@ const rules = {
 }
 
 const loadCompetitions = async () => {
-  await competitionsRequest.run(
+  await runCompetitions(
     async () => {
       competitions.value = await listCompetitionsPublic()
     },
@@ -64,7 +64,7 @@ onMounted(() => {
 
 const loadLoginOptions = async () => {
   if (!form.username) return
-  await optionsRequest.run(
+  await runOptions(
     async () => {
       const data = await loginOptions(form.username)
       availableMethods.value = data.methods
@@ -81,7 +81,7 @@ const handleLogin = async () => {
   await formRef.value.validate(async (valid: boolean) => {
     if (!valid) return
     result.value = ''
-    await request.run(
+    await runRequest(
       async () => {
       if (form.method === 'passkey') {
         if (!window.PublicKeyCredential) {
@@ -155,13 +155,13 @@ const handleLogin = async () => {
     <el-table v-if="competitions.length" :data="competitions">
       <el-table-column prop="name" label="竞赛名称" />
     </el-table>
-    <el-empty v-else :description="competitionsRequest.loading ? '加载中' : '暂无竞赛数据'" />
+    <el-empty v-else :description="competitionsLoading ? '加载中' : '暂无竞赛数据'" />
     <el-alert
-      v-if="competitionsRequest.error"
+      v-if="competitionsError"
       style="margin-top: 12px"
       type="error"
       show-icon
-      :title="competitionsRequest.error"
+      :title="competitionsError"
       :closable="false"
     />
   </el-card>
@@ -200,7 +200,7 @@ const handleLogin = async () => {
       <el-form-item v-if="form.method === 'password'" label="密码" prop="password">
         <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
       </el-form-item>
-      <el-button type="primary" :loading="request.loading" @click="handleLogin">进入认证</el-button>
+      <el-button type="primary" :loading="requestLoading" @click="handleLogin">进入认证</el-button>
     </el-form>
     <p style="margin-top: 12px">
       <router-link to="/password-reset/request">学生忘记密码？</router-link>
@@ -212,12 +212,12 @@ const handleLogin = async () => {
   </el-card>
 
   <el-alert
-    v-if="request.error"
+    v-if="requestError"
     class="card"
     style="margin-top: 16px"
     type="error"
     show-icon
-    :title="request.error"
+    :title="requestError"
     :closable="false"
   />
 </template>

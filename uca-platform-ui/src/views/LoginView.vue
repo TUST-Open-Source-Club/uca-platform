@@ -28,7 +28,7 @@ const methods = [
   { id: 'totp', title: 'TOTP 登录', desc: '输入动态验证码' },
   { id: 'password', title: '密码登录', desc: '仅学生可使用默认或自设密码' },
 ]
-const availableMethods = ref<string[]>(['passkey', 'totp'])
+const availableMethods = ref<string[]>(['passkey', 'totp', 'password'])
 
 const rules = {
   username: [
@@ -144,8 +144,47 @@ const handleLogin = async () => {
 <template>
   <section class="hero">
     <h1>欢迎进入劳动教育学时认定系统</h1>
-    <p>请使用 Passkey 或 TOTP 完成认证。学生可使用密码登录。</p>
+    <p>请使用 Passkey 或 TOTP 完成认证。密码登录仅限学生使用。</p>
   </section>
+
+  <el-card class="card" style="margin-top: 24px">
+    <h3>账户输入</h3>
+    <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+      <el-form-item v-if="form.method !== 'passkey'" label="学号 / 工号" prop="username">
+        <el-input v-model="form.username" placeholder="请输入学号或工号" @blur="loadLoginOptions" />
+      </el-form-item>
+      <el-form-item label="认证方式">
+        <el-select v-model="form.method">
+          <el-option
+            v-for="method in methods.filter((item) => availableMethods.includes(item.id))"
+            :key="method.id"
+            :value="method.id"
+            :label="method.title"
+          />
+        </el-select>
+        <div style="margin-top: 6px; color: var(--muted); font-size: 12px">
+          密码登录仅限学生使用，教职工请使用 Passkey 或 TOTP。
+        </div>
+      </el-form-item>
+      <el-form-item v-if="form.method === 'totp'" label="验证码" prop="code">
+        <el-input v-model="form.code" placeholder="请输入验证码" />
+      </el-form-item>
+      <el-form-item v-if="form.method === 'password'" label="密码" prop="password">
+        <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
+        <div style="margin-top: 6px; color: var(--muted); font-size: 12px">
+          学生默认密码为 st+学号，登录后可在个人中心修改。
+        </div>
+      </el-form-item>
+      <el-button type="primary" :loading="requestLoading" @click="handleLogin">进入认证</el-button>
+    </el-form>
+    <p style="margin-top: 12px">
+      <router-link to="/password-reset/request">学生忘记密码？</router-link>
+    </p>
+    <p>
+      <router-link to="/reset-code">使用一次性重置码</router-link>
+    </p>
+    <pre v-if="result">{{ result }}</pre>
+  </el-card>
 
   <el-card class="card" style="margin-top: 16px">
     <h3>竞赛清单（仅查询）</h3>
@@ -164,51 +203,7 @@ const handleLogin = async () => {
     />
   </el-card>
 
-  <div class="card-grid">
-    <el-card
-      v-for="methodItem in methods.filter((item) => availableMethods.includes(item.id))"
-      :key="methodItem.id"
-      class="card"
-    >
-      <h3>{{ methodItem.title }}</h3>
-      <p>{{ methodItem.desc }}</p>
-      <el-button type="primary" @click="form.method = methodItem.id">选择</el-button>
-    </el-card>
-  </div>
-
-  <el-card class="card" style="margin-top: 24px">
-    <h3>账户输入</h3>
-    <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-      <el-form-item label="学号 / 工号" prop="username">
-        <el-input v-model="form.username" placeholder="请输入学号或工号" @blur="loadLoginOptions" />
-      </el-form-item>
-      <el-form-item label="认证方式">
-        <el-select v-model="form.method">
-          <el-option
-            v-for="method in methods.filter((item) => availableMethods.includes(item.id))"
-            :key="method.id"
-            :value="method.id"
-            :label="method.title"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="form.method === 'totp'" label="验证码" prop="code">
-        <el-input v-model="form.code" placeholder="请输入验证码" />
-      </el-form-item>
-      <el-form-item v-if="form.method === 'password'" label="密码" prop="password">
-        <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
-      </el-form-item>
-      <el-button type="primary" :loading="requestLoading" @click="handleLogin">进入认证</el-button>
-    </el-form>
-    <p style="margin-top: 12px">
-      <router-link to="/password-reset/request">学生忘记密码？</router-link>
-    </p>
-    <p>
-      <router-link to="/reset-code">使用一次性重置码</router-link>
-    </p>
-    <pre v-if="result">{{ result }}</pre>
-  </el-card>
-
+  
   <el-alert
     v-if="requestError"
     class="card"

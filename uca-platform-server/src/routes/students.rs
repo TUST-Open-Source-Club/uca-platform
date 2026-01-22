@@ -20,6 +20,19 @@ use crate::{
     state::AppState,
 };
 
+/// 学生导入时的密码规则。
+#[derive(Debug, Deserialize)]
+pub struct StudentPasswordRule {
+    /// 固定前缀。
+    pub prefix: Option<String>,
+    /// 固定后缀。
+    pub suffix: Option<String>,
+    /// 是否包含学号。
+    pub include_student_no: bool,
+    /// 是否包含手机号。
+    pub include_phone: bool,
+}
+
 /// 学生列表响应。
 #[derive(Debug, Serialize)]
 pub struct StudentResponse {
@@ -39,10 +52,12 @@ pub struct StudentResponse {
     pub class_name: String,
     /// 手机号。
     pub phone: String,
+    /// 是否允许学生使用密码登录。
+    pub allow_password_login: bool,
 }
 
-impl From<students::Model> for StudentResponse {
-    fn from(model: students::Model) -> Self {
+impl StudentResponse {
+    pub fn from_model(model: students::Model, allow_password_login: bool) -> Self {
         Self {
             id: model.id,
             student_no: model.student_no,
@@ -52,6 +67,7 @@ impl From<students::Model> for StudentResponse {
             major: model.major,
             class_name: model.class_name,
             phone: model.phone,
+            allow_password_login,
         }
     }
 }
@@ -138,8 +154,13 @@ pub async fn create_student(
                 .update(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&state.db, &payload.student_no, &payload.name, true).await?;
-            return Ok(Json(StudentResponse::from(model)));
+            upsert_student_user(&state.db, &payload.student_no, &payload.name, None).await?;
+            let allow_password_login =
+                fetch_student_login_flag(&state.db, &payload.student_no).await?;
+            return Ok(Json(StudentResponse::from_model(
+                model,
+                allow_password_login,
+            )));
         }
         return Err(AppError::bad_request("student number exists"));
     }
@@ -164,7 +185,9 @@ pub async fn create_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    upsert_student_user(&state.db, &payload.student_no, &payload.name, true).await?;
+    upsert_student_user(&state.db, &payload.student_no, &payload.name, Some(false)).await?;
+    let allow_password_login =
+        fetch_student_login_flag(&state.db, &payload.student_no).await?;
 
     let model = students::Model {
         id,
@@ -179,7 +202,10 @@ pub async fn create_student(
         created_at: now,
         updated_at: now,
     };
-    Ok(Json(StudentResponse::from(model)))
+    Ok(Json(StudentResponse::from_model(
+        model,
+        allow_password_login,
+    )))
 }
 
 /// 更新学生信息（仅管理员）。
@@ -217,9 +243,13 @@ pub async fn update_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    upsert_student_user(&state.db, &student_no, &payload.name, true).await?;
+    upsert_student_user(&state.db, &student_no, &payload.name, None).await?;
+    let allow_password_login = fetch_student_login_flag(&state.db, &student_no).await?;
 
-    Ok(Json(StudentResponse::from(model)))
+    Ok(Json(StudentResponse::from_model(
+        model,
+        allow_password_login,
+    )))
 }
 
 /// 学生筛选查询。
@@ -268,7 +298,30 @@ pub async fn list_students(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(results.into_iter().map(StudentResponse::from).collect()))
+    let usernames: Vec<String> = results.iter().map(|item| item.student_no.clone()).collect();
+    let user_records = if usernames.is_empty() {
+        Vec::new()
+    } else {
+        User::find()
+            .filter(users::Column::Username.is_in(usernames))
+            .all(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+    };
+    let mut allow_map = HashMap::new();
+    for record in user_records {
+        allow_map.insert(record.username, record.allow_password_login);
+    }
+
+    Ok(Json(
+        results
+            .into_iter()
+            .map(|model| {
+                let allow = allow_map.get(&model.student_no).copied().unwrap_or(false);
+                StudentResponse::from_model(model, allow)
+            })
+            .collect(),
+    ))
 }
 
 /// 从 Excel 导入学生（仅管理员）。
@@ -286,10 +339,26 @@ pub async fn import_students(
         .map(|value| serde_json::from_str::<HashMap<String, String>>(value))
         .transpose()
         .map_err(|_| AppError::bad_request("invalid field_map"))?;
-    let allow_login = fields
-        .get("allow_login")
+    let create_user = fields
+        .get("create_user")
         .map(|value| value == "true" || value == "1")
         .unwrap_or(false);
+    let password_rule = if create_user {
+        Some(
+            fields
+                .get("password_rule")
+                .ok_or_else(|| AppError::bad_request("password_rule required"))?,
+        )
+    } else {
+        None
+    };
+    let password_rule = match password_rule {
+        Some(value) => Some(
+            serde_json::from_str::<StudentPasswordRule>(value)
+                .map_err(|_| AppError::bad_request("invalid password_rule"))?,
+        ),
+        None => None,
+    };
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
     let sheet_name = workbook
@@ -312,6 +381,8 @@ pub async fn import_students(
 
     let mut inserted = 0usize;
     let mut updated = 0usize;
+    let mut created_users = 0usize;
+    let mut skipped_users = 0usize;
 
     for row in range.rows().skip(1) {
         let student_no = read_cell_by_index_opt(base_index.get("student_no"), row);
@@ -347,7 +418,15 @@ pub async fn import_students(
                 .update(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&transaction, &student_no, &name, allow_login).await?;
+            if let Some(rule) = password_rule.as_ref() {
+                let created = ensure_student_user(&transaction, &student_no, &name, &phone, rule)
+                .await?;
+                if created {
+                    created_users += 1;
+                } else {
+                    skipped_users += 1;
+                }
+            }
             updated += 1;
         } else {
             let model = students::ActiveModel {
@@ -367,7 +446,15 @@ pub async fn import_students(
                 .exec_without_returning(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
-            upsert_student_user(&transaction, &student_no, &name, allow_login).await?;
+            if let Some(rule) = password_rule.as_ref() {
+                let created = ensure_student_user(&transaction, &student_no, &name, &phone, rule)
+                .await?;
+                if created {
+                    created_users += 1;
+                } else {
+                    skipped_users += 1;
+                }
+            }
             inserted += 1;
         }
     }
@@ -379,7 +466,9 @@ pub async fn import_students(
 
     Ok(Json(serde_json::json!({
         "inserted": inserted,
-        "updated": updated
+        "updated": updated,
+        "created_users": created_users,
+        "skipped_users": skipped_users
     })))
 }
 
@@ -494,7 +583,7 @@ async fn upsert_student_user<C>(
     db: &C,
     student_no: &str,
     name: &str,
-    allow_login: bool,
+    allow_login: Option<bool>,
 ) -> Result<(), AppError>
 where
     C: ConnectionTrait,
@@ -515,7 +604,12 @@ where
         if missing_password {
             active.password_hash = Set(Some(default_hash));
         }
-        active.allow_password_login = Set(allow_login);
+        if let Some(value) = allow_login {
+            active.allow_password_login = Set(value);
+            if value {
+                active.must_change_password = Set(true);
+            }
+        }
         active.updated_at = Set(now);
         active
             .update(db)
@@ -531,8 +625,9 @@ where
         role: Set("student".to_string()),
         email: Set(None),
         password_hash: Set(Some(default_hash)),
-        allow_password_login: Set(allow_login),
+        allow_password_login: Set(allow_login.unwrap_or(false)),
         password_updated_at: Set(Some(now)),
+        must_change_password: Set(allow_login.unwrap_or(false)),
         is_active: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
@@ -542,6 +637,84 @@ where
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
     Ok(())
+}
+
+async fn ensure_student_user<C>(
+    db: &C,
+    student_no: &str,
+    name: &str,
+    phone: &str,
+    rule: &StudentPasswordRule,
+) -> Result<bool, AppError>
+where
+    C: ConnectionTrait,
+{
+    let exists = User::find()
+        .filter(users::Column::Username.eq(student_no))
+        .one(db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if exists.is_some() {
+        return Ok(false);
+    }
+
+    let mut parts = Vec::new();
+    if let Some(prefix) = rule.prefix.as_ref() {
+        if !prefix.is_empty() {
+            parts.push(prefix.clone());
+        }
+    }
+    if rule.include_student_no {
+        parts.push(student_no.to_string());
+    }
+    if rule.include_phone {
+        if phone.is_empty() {
+            return Err(AppError::bad_request("student phone missing"));
+        }
+        parts.push(phone.to_string());
+    }
+    if let Some(suffix) = rule.suffix.as_ref() {
+        if !suffix.is_empty() {
+            parts.push(suffix.clone());
+        }
+    }
+    let password = parts.join("");
+    if password.is_empty() {
+        return Err(AppError::bad_request("password rule produces empty password"));
+    }
+    let hash = hash_password(&password)?;
+    let now = Utc::now();
+    let model = users::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        username: Set(student_no.to_string()),
+        display_name: Set(name.to_string()),
+        role: Set("student".to_string()),
+        email: Set(None),
+        password_hash: Set(Some(hash)),
+        allow_password_login: Set(true),
+        password_updated_at: Set(Some(now)),
+        must_change_password: Set(true),
+        is_active: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    users::Entity::insert(model)
+        .exec_without_returning(db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Ok(true)
+}
+
+async fn fetch_student_login_flag<C>(db: &C, student_no: &str) -> Result<bool, AppError>
+where
+    C: ConnectionTrait,
+{
+    let record = User::find()
+        .filter(users::Column::Username.eq(student_no))
+        .one(db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Ok(record.map(|item| item.allow_password_login).unwrap_or(false))
 }
 
 fn read_cell(index: &std::collections::HashMap<String, usize>, key: &str, row: &[Data]) -> String {

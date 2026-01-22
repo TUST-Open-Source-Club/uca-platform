@@ -10,6 +10,7 @@ export type CurrentUser = {
   username: string
   display_name: string
   role: 'student' | 'reviewer' | 'teacher' | 'admin'
+  must_change_password: boolean
 }
 
 export type PasswordPolicy = {
@@ -18,6 +19,10 @@ export type PasswordPolicy = {
   require_lowercase: boolean
   require_digit: boolean
   require_symbol: boolean
+}
+
+export type AuthConfig = {
+  reset_delivery: 'email' | 'code'
 }
 
 export type ReauthTokenResponse = {
@@ -98,12 +103,20 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   return requestJson('/auth/me', { method: 'GET' })
 }
 
+export async function logout(): Promise<{ status: string }> {
+  return requestJson('/auth/logout', { method: 'POST' })
+}
+
 export async function getPasswordPolicy(): Promise<PasswordPolicy> {
   return requestJson('/auth/password-policy', { method: 'GET' })
 }
 
 export async function bootstrapStatus(): Promise<{ ready: boolean; needs_totp: boolean }> {
   return requestJson('/auth/bootstrap/status', { method: 'GET' })
+}
+
+export async function getAuthConfig(): Promise<AuthConfig> {
+  return requestJson('/auth/config', { method: 'GET' })
 }
 
 export async function bootstrapAdmin(payload: {

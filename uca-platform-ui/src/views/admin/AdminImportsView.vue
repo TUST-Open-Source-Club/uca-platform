@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import type { UploadFile } from 'element-plus'
 import { importCompetitions, importContestRecords, type CompetitionSheetPlan } from '../../api/admin'
 import { importStudents } from '../../api/students'
@@ -12,11 +12,17 @@ const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
 const result = ref('')
+const createStudentUsers = ref(false)
+const studentPasswordRule = reactive({
+  prefix: 'st',
+  suffix: '',
+  include_student_no: true,
+  include_phone: false,
+})
 
-const allowStudentLogin = ref(false)
-const showStudentDialog = ref(false)
-const showCompetitionDialog = ref(false)
-const showContestDialog = ref(false)
+const studentStep = ref(1)
+const competitionStep = ref(1)
+const contestStep = ref(1)
 const competitionSheetPlan = ref<
   {
     name: string
@@ -79,16 +85,31 @@ const contestImportRules = {
   fileName: [{ required: true, message: '请选择竞赛获奖导入文件', trigger: 'change' }],
 }
 
+const competitionMissingYear = computed(() =>
+  competitionSheetPlan.value.filter((item) => item.name.trim() && !item.year.trim()),
+)
+
+const isPasswordRuleEmpty = () => {
+  const prefix = studentPasswordRule.prefix?.trim() ?? ''
+  const suffix = studentPasswordRule.suffix?.trim() ?? ''
+  return !prefix && !suffix && !studentPasswordRule.include_student_no && !studentPasswordRule.include_phone
+}
+
 const handleImport = async () => {
   if (!importFormRef.value) return
   await importFormRef.value.validate(async (valid: boolean) => {
     if (!valid) return
+    if (createStudentUsers.value && isPasswordRuleEmpty()) {
+      importRequest.error = '请设置密码规则，至少包含一个字段或固定字符串'
+      return
+    }
     await importRequest.run(
       async () => {
         const data = await importStudents(
           importFile.value as File,
           buildFieldMap(studentFieldMap.value),
-          allowStudentLogin.value,
+          createStudentUsers.value,
+          createStudentUsers.value ? { ...studentPasswordRule } : undefined,
         )
         result.value = JSON.stringify(data, null, 2)
       },
@@ -190,6 +211,54 @@ const buildFieldMap = (rows: { key: string; column: string }[]) => {
   return Object.keys(map).length ? map : undefined
 }
 
+const goStudentNext = async () => {
+  if (studentStep.value === 1) {
+    if (!importFormRef.value) return
+    await importFormRef.value.validate(async (valid: boolean) => {
+      if (!valid) return
+      studentStep.value = 2
+    })
+    return
+  }
+  if (studentStep.value === 2) {
+    await handleImport()
+  }
+}
+
+const goContestNext = async () => {
+  if (contestStep.value === 1) {
+    if (!contestImportRef.value) return
+    await contestImportRef.value.validate(async (valid: boolean) => {
+      if (!valid) return
+      contestStep.value = 2
+    })
+    return
+  }
+  if (contestStep.value === 2) {
+    await handleContestImport()
+  }
+}
+
+const goCompetitionNext = async () => {
+  if (competitionStep.value === 1) {
+    if (!competitionImportRef.value) return
+    await competitionImportRef.value.validate(async (valid: boolean) => {
+      if (!valid) return
+      competitionStep.value = 2
+    })
+    return
+  }
+  if (competitionStep.value === 2) {
+    if (competitionMissingYear.value.length === 0) {
+      await handleCompetitionImport()
+      return
+    }
+    competitionStep.value = 3
+    return
+  }
+  await handleCompetitionImport()
+}
+
 onMounted(() => {
   if (!competitionSheetPlan.value.length) {
     addCompetitionSheet()
@@ -206,178 +275,228 @@ onMounted(() => {
   <div class="card-grid">
     <el-card class="card">
       <h3>学生名单导入</h3>
+      <el-steps :active="studentStep - 1" finish-status="success" align-center style="margin: 12px 0 16px">
+        <el-step title="上传文件" />
+        <el-step title="字段映射" />
+        <el-step title="确认导入" />
+      </el-steps>
       <el-form ref="importFormRef" :model="importForm" :rules="importRules" label-position="top">
-        <el-form-item label="Excel 文件" prop="fileName">
-          <el-upload
-            :auto-upload="false"
-            :limit="1"
-            :show-file-list="true"
-            :on-change="handleFileChange"
-          >
-            <el-button>选择文件</el-button>
-          </el-upload>
-        </el-form-item>
-        <div style="display: flex; gap: 8px; margin-top: 8px">
-          <el-button @click="showStudentDialog = true">配置导入</el-button>
-          <el-button type="primary" :loading="importRequest.loading" @click="handleImport">
-            上传名单
+        <div v-if="studentStep === 1">
+          <el-form-item label="Excel 文件" prop="fileName">
+            <el-upload
+              :auto-upload="false"
+              :limit="1"
+              :show-file-list="true"
+              :on-change="handleFileChange"
+            >
+              <el-button>选择文件</el-button>
+            </el-upload>
+          </el-form-item>
+          <el-button type="primary" :loading="importRequest.loading" @click="goStudentNext">
+            下一步
           </el-button>
         </div>
-        <el-switch
-          v-model="allowStudentLogin"
-          active-text="允许学生登录"
-          inactive-text="禁止学生登录"
-          style="margin-top: 12px"
-        />
+        <div v-else-if="studentStep === 2">
+          <el-table :data="studentFieldMap" style="margin-bottom: 12px">
+            <el-table-column label="字段">
+              <template #default="{ row }">
+                <span>{{ row.label }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Excel 列">
+              <template #default="{ row }">
+                <el-input v-model="row.column" placeholder="表头/列字母/列序号" />
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-switch
+            v-model="createStudentUsers"
+            active-text="导入同时创建学生用户"
+            inactive-text="仅导入学生名单"
+            style="margin-bottom: 12px"
+          />
+          <div v-if="createStudentUsers" style="margin-bottom: 12px">
+            <el-form label-position="top" style="display: flex; flex-wrap: wrap; gap: 12px">
+              <el-form-item label="密码前缀">
+                <el-input v-model="studentPasswordRule.prefix" placeholder="例如 st" />
+              </el-form-item>
+              <el-form-item label="密码后缀">
+                <el-input v-model="studentPasswordRule.suffix" placeholder="例如 @2024" />
+              </el-form-item>
+              <el-form-item label="包含学号">
+                <el-switch v-model="studentPasswordRule.include_student_no" />
+              </el-form-item>
+              <el-form-item label="包含手机号">
+                <el-switch v-model="studentPasswordRule.include_phone" />
+              </el-form-item>
+            </el-form>
+          </div>
+          <p style="margin-top: 8px; color: var(--muted)">
+            留空表示按默认表头匹配；可填写列字母（A/B）或列序号（从 1 开始）。学生是否允许登录请到“学生名单管理”中设置。
+          </p>
+          <div style="display: flex; gap: 8px; margin-top: 12px">
+            <el-button @click="studentStep = 1">上一步</el-button>
+            <el-button type="primary" :loading="importRequest.loading" @click="goStudentNext">
+              导入
+            </el-button>
+          </div>
+        </div>
       </el-form>
     </el-card>
 
     <el-card class="card">
       <h3>竞赛名称库导入</h3>
+      <el-steps :active="competitionStep - 1" finish-status="success" align-center style="margin: 12px 0 16px">
+        <el-step title="上传文件" />
+        <el-step title="映射配置" />
+        <el-step title="年份设置" />
+      </el-steps>
       <el-form
         ref="competitionImportRef"
         :model="competitionImportForm"
         :rules="competitionImportRules"
         label-position="top"
       >
-        <el-form-item label="竞赛库 Excel" prop="fileName">
-          <el-upload
-            :auto-upload="false"
-            :limit="1"
-            :show-file-list="true"
-            :on-change="handleCompetitionFileChange"
-          >
-            <el-button>选择文件</el-button>
-          </el-upload>
-        </el-form-item>
-        <div style="display: flex; gap: 8px; margin-top: 8px">
-          <el-button @click="showCompetitionDialog = true">配置导入</el-button>
-          <el-button
-            type="primary"
-            :loading="competitionImportRequest.loading"
-            @click="handleCompetitionImport"
-          >
-            导入竞赛库
+        <div v-if="competitionStep === 1">
+          <el-form-item label="竞赛库 Excel" prop="fileName">
+            <el-upload
+              :auto-upload="false"
+              :limit="1"
+              :show-file-list="true"
+              :on-change="handleCompetitionFileChange"
+            >
+              <el-button>选择文件</el-button>
+            </el-upload>
+          </el-form-item>
+          <el-button type="primary" :loading="competitionImportRequest.loading" @click="goCompetitionNext">
+            下一步
           </el-button>
         </div>
-        <p style="margin-top: 8px; color: var(--muted)">
-          通过导入弹窗选择工作表、年份与列映射；列可填写表头名或列字母/序号。
-        </p>
+        <div v-else-if="competitionStep === 2">
+          <el-table :data="competitionSheetPlan" style="margin-bottom: 12px">
+            <el-table-column label="工作表名称">
+              <template #default="{ row }">
+                <el-input v-model="row.name" placeholder="例如 Sheet1" />
+              </template>
+            </el-table-column>
+            <el-table-column label="年份">
+              <template #default="{ row }">
+                <el-input v-model="row.year" placeholder="例如 2024" />
+              </template>
+            </el-table-column>
+            <el-table-column label="竞赛名称列">
+              <template #default="{ row }">
+                <el-input v-model="row.name_column" placeholder="表头/列字母/列序号" />
+              </template>
+            </el-table-column>
+            <el-table-column label="竞赛类别列">
+              <template #default="{ row }">
+                <el-input v-model="row.category_column" placeholder="表头/列字母/列序号" />
+              </template>
+            </el-table-column>
+            <el-table-column label="类别后缀" width="160">
+              <template #default="{ row }">
+                <el-select v-model="row.category_suffix">
+                  <el-option label="无" value="none" />
+                  <el-option label="类" value="class" />
+                  <el-option label="类竞赛" value="class_contest" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{ $index }">
+                <el-button size="small" type="danger" @click="removeCompetitionSheet($index)">
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-button size="small" @click="addCompetitionSheet">新增工作表</el-button>
+          <p style="margin-top: 8px; color: var(--muted)">
+            列可填写表头名或列字母/序号。若已填写所有年份将直接导入。
+          </p>
+          <div style="display: flex; gap: 8px; margin-top: 12px">
+            <el-button @click="competitionStep = 1">上一步</el-button>
+            <el-button type="primary" :loading="competitionImportRequest.loading" @click="goCompetitionNext">
+              下一步
+            </el-button>
+          </div>
+        </div>
+        <div v-else>
+          <el-table :data="competitionMissingYear" style="margin-bottom: 12px">
+            <el-table-column label="工作表">
+              <template #default="{ row }">
+                <span>{{ row.name }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="年份">
+              <template #default="{ row }">
+                <el-input v-model="row.year" placeholder="例如 2024" />
+              </template>
+            </el-table-column>
+          </el-table>
+          <p style="margin-top: 8px; color: var(--muted)">
+            若工作表缺少年份列，请在此补充；填完后直接导入。
+          </p>
+          <div style="display: flex; gap: 8px; margin-top: 12px">
+            <el-button @click="competitionStep = 2">上一步</el-button>
+            <el-button type="primary" :loading="competitionImportRequest.loading" @click="goCompetitionNext">
+              导入
+            </el-button>
+          </div>
+        </div>
       </el-form>
     </el-card>
 
     <el-card class="card">
       <h3>竞赛获奖记录导入</h3>
+      <el-steps :active="contestStep - 1" finish-status="success" align-center style="margin: 12px 0 16px">
+        <el-step title="上传文件" />
+        <el-step title="字段映射" />
+        <el-step title="确认导入" />
+      </el-steps>
       <el-form ref="contestImportRef" :model="contestImportForm" :rules="contestImportRules" label-position="top">
-        <el-form-item label="竞赛获奖 Excel" prop="fileName">
-          <el-upload
-            :auto-upload="false"
-            :limit="1"
-            :show-file-list="true"
-            :on-change="handleContestFileChange"
-          >
-            <el-button>选择文件</el-button>
-          </el-upload>
-        </el-form-item>
-        <div style="display: flex; gap: 8px; margin-top: 8px">
-          <el-button @click="showContestDialog = true">配置导入</el-button>
-          <el-button type="primary" :loading="contestImportRequest.loading" @click="handleContestImport">
-            导入竞赛获奖
+        <div v-if="contestStep === 1">
+          <el-form-item label="竞赛获奖 Excel" prop="fileName">
+            <el-upload
+              :auto-upload="false"
+              :limit="1"
+              :show-file-list="true"
+              :on-change="handleContestFileChange"
+            >
+              <el-button>选择文件</el-button>
+            </el-upload>
+          </el-form-item>
+          <el-button type="primary" :loading="contestImportRequest.loading" @click="goContestNext">
+            下一步
           </el-button>
+        </div>
+        <div v-else-if="contestStep === 2">
+          <el-table :data="contestFieldMap" style="margin-bottom: 12px">
+            <el-table-column label="字段">
+              <template #default="{ row }">
+                <span>{{ row.label }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Excel 列">
+              <template #default="{ row }">
+                <el-input v-model="row.column" placeholder="表头/列字母/列序号" />
+              </template>
+            </el-table-column>
+          </el-table>
+          <p style="margin-top: 8px; color: var(--muted)">
+            留空表示按默认表头匹配；年份请在映射中指定年份列。
+          </p>
+          <div style="display: flex; gap: 8px; margin-top: 12px">
+            <el-button @click="contestStep = 1">上一步</el-button>
+            <el-button type="primary" :loading="contestImportRequest.loading" @click="goContestNext">
+              导入
+            </el-button>
+          </div>
         </div>
       </el-form>
     </el-card>
   </div>
-
-  <el-dialog v-model="showStudentDialog" title="学生名单导入配置" width="640px">
-    <el-table :data="studentFieldMap" style="margin-bottom: 12px">
-      <el-table-column label="字段">
-        <template #default="{ row }">
-          <span>{{ row.label }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Excel 列">
-        <template #default="{ row }">
-          <el-input v-model="row.column" placeholder="表头/列字母/列序号" />
-        </template>
-      </el-table-column>
-    </el-table>
-    <p style="margin-top: 8px; color: var(--muted)">
-      留空表示按默认表头匹配；可填写列字母（A/B）或列序号（从 1 开始）。
-    </p>
-    <template #footer>
-      <el-button @click="showStudentDialog = false">关闭</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="showCompetitionDialog" title="竞赛库导入配置" width="860px">
-    <el-table :data="competitionSheetPlan" style="margin-bottom: 12px">
-      <el-table-column label="工作表名称">
-        <template #default="{ row }">
-          <el-input v-model="row.name" placeholder="例如 Sheet1" />
-        </template>
-      </el-table-column>
-      <el-table-column label="年份">
-        <template #default="{ row }">
-          <el-input v-model="row.year" placeholder="例如 2024" />
-        </template>
-      </el-table-column>
-      <el-table-column label="竞赛名称列">
-        <template #default="{ row }">
-          <el-input v-model="row.name_column" placeholder="表头/列字母/列序号" />
-        </template>
-      </el-table-column>
-      <el-table-column label="竞赛类别列">
-        <template #default="{ row }">
-          <el-input v-model="row.category_column" placeholder="表头/列字母/列序号" />
-        </template>
-      </el-table-column>
-      <el-table-column label="类别后缀" width="160">
-        <template #default="{ row }">
-          <el-select v-model="row.category_suffix">
-            <el-option label="无" value="none" />
-            <el-option label="类" value="class" />
-            <el-option label="类竞赛" value="class_contest" />
-          </el-select>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="120">
-        <template #default="{ $index }">
-          <el-button size="small" type="danger" @click="removeCompetitionSheet($index)">
-            删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <el-button size="small" @click="addCompetitionSheet">新增工作表</el-button>
-    <p style="margin-top: 12px; color: var(--muted)">
-      未填写年份时将尝试读取“年份/年度”列；若缺失会提示补充年份。
-    </p>
-    <template #footer>
-      <el-button @click="showCompetitionDialog = false">关闭</el-button>
-    </template>
-  </el-dialog>
-
-  <el-dialog v-model="showContestDialog" title="竞赛获奖导入配置" width="720px">
-    <el-table :data="contestFieldMap" style="margin-bottom: 12px">
-      <el-table-column label="字段">
-        <template #default="{ row }">
-          <span>{{ row.label }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Excel 列">
-        <template #default="{ row }">
-          <el-input v-model="row.column" placeholder="表头/列字母/列序号" />
-        </template>
-      </el-table-column>
-    </el-table>
-    <p style="margin-top: 8px; color: var(--muted)">
-      留空表示按默认表头匹配；可填写列字母（A/B）或列序号（从 1 开始）。
-    </p>
-    <template #footer>
-      <el-button @click="showContestDialog = false">关闭</el-button>
-    </template>
-  </el-dialog>
 
   <el-alert
     v-if="importRequest.error || competitionImportRequest.error || contestImportRequest.error"

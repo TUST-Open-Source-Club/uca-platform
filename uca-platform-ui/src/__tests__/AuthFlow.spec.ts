@@ -104,9 +104,9 @@ describe('Auth flow', () => {
     await router.push('/')
     await router.isReady()
     const wrapper = mount(LoginView, { global: { stubs, plugins: [pinia, router] } })
-    wrapper.vm.form.username = 'u1'
-    wrapper.vm.form.code = '123456'
-    wrapper.vm.form.method = 'totp'
+    ;(wrapper.vm as any).form.username = 'u1'
+    ;(wrapper.vm as any).form.code = '123456'
+    ;(wrapper.vm as any).form.method = 'totp'
     const submit = wrapper.findAll('button').find((btn) => btn.text() === '进入认证')
     await submit?.trigger('click')
     await flushPromises()
@@ -124,8 +124,8 @@ describe('Auth flow', () => {
     await router.push('/')
     await router.isReady()
     const wrapper = mount(LoginView, { global: { stubs, plugins: [pinia, router] } })
-    wrapper.vm.form.username = 'u3'
-    wrapper.vm.form.method = 'passkey'
+    ;(wrapper.vm as any).form.username = 'u3'
+    ;(wrapper.vm as any).form.method = 'passkey'
     const submit = wrapper.findAll('button').find((btn) => btn.text() === '进入认证')
     await submit?.trigger('click')
     await flushPromises()
@@ -143,8 +143,8 @@ describe('Auth flow', () => {
     await router.push('/')
     await router.isReady()
     const wrapper = mount(TwoFactorView, { global: { stubs, plugins: [pinia, router] } })
-    wrapper.vm.form.username = 'u4'
-    wrapper.vm.form.code = '123456'
+    ;(wrapper.vm as any).form.username = 'u4'
+    ;(wrapper.vm as any).form.code = '123456'
     await wrapper.find('button').trigger('click')
     await flushPromises()
     expect(totpVerify).toHaveBeenCalledWith('u4', '123456')

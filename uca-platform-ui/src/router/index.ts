@@ -85,6 +85,9 @@ router.beforeEach(async (to) => {
   }
   await auth.ensureSession()
   if (!auth.loggedIn) return '/login'
+  if (auth.role === 'student' && auth.mustChangePassword && to.path !== '/student') {
+    return '/student'
+  }
   if ((to.path === '/purge' || to.path.startsWith('/admin')) && auth.role !== 'admin') {
     return auth.homePath()
   }

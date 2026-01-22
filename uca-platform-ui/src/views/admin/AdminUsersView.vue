@@ -1,18 +1,27 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { createUser } from '../../api/admin'
 import { useRequest } from '../../composables/useRequest'
+import { useAuthStore } from '../../stores/auth'
 
 const userFormRef = ref()
 const result = ref('')
 const userRequest = useRequest()
+const auth = useAuthStore()
+
+onMounted(() => {
+  void auth.ensureConfig()
+})
 
 const userForm = reactive({
   username: '',
   display_name: '',
   role: 'student',
   email: '',
+  reset_purpose: 'totp',
 })
+
+const requireEmail = computed(() => auth.resetDelivery === 'email' && userForm.role !== 'student')
 
 const userRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -21,7 +30,7 @@ const userRules = {
   email: [
     {
       validator: (_rule: unknown, value: string, callback: (err?: Error) => void) => {
-        if (userForm.role !== 'student' && !value) {
+        if (requireEmail.value && !value) {
           callback(new Error('非学生必须填写邮箱'))
           return
         }
@@ -42,6 +51,7 @@ const handleCreateUser = async () => {
         display_name: userForm.display_name,
         role: userForm.role as 'student' | 'teacher' | 'reviewer' | 'admin',
         email: userForm.email || undefined,
+        reset_purpose: auth.resetDelivery === 'code' ? (userForm.reset_purpose as 'totp' | 'passkey') : undefined,
       }
       const data = await createUser(payload)
       result.value = JSON.stringify(data, null, 2)
@@ -53,7 +63,8 @@ const handleCreateUser = async () => {
 <template>
   <section class="hero">
     <h1>创建用户 / 发送邀请</h1>
-    <p>新增用户并发送邀请邮件。</p>
+    <p v-if="auth.resetDelivery === 'email'">新增用户并发送邀请邮件。</p>
+    <p v-else>新增用户后生成一次性重置码，用户凭重置码绑定认证方式。</p>
   </section>
 
   <div class="card-grid">
@@ -73,8 +84,14 @@ const handleCreateUser = async () => {
             <el-option label="管理员" value="admin" />
           </el-select>
         </el-form-item>
-        <el-form-item label="邮箱（非学生必填）" prop="email">
+        <el-form-item :label="requireEmail ? '邮箱（非学生必填）' : '邮箱（可选）'" prop="email">
           <el-input v-model="userForm.email" placeholder="user@example.com" />
+        </el-form-item>
+        <el-form-item v-if="auth.resetDelivery === 'code' && userForm.role !== 'student'" label="重置用途">
+          <el-select v-model="userForm.reset_purpose">
+            <el-option label="TOTP" value="totp" />
+            <el-option label="Passkey" value="passkey" />
+          </el-select>
         </el-form-item>
         <el-button type="primary" :loading="userRequest.loading" @click="handleCreateUser">
           提交

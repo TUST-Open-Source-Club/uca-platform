@@ -64,6 +64,8 @@ pub struct CurrentUserResponse {
     pub display_name: String,
     /// 角色。
     pub role: String,
+    /// 是否必须修改密码（学生账号）。
+    pub must_change_password: bool,
 }
 
 /// 获取当前会话的用户信息。
@@ -77,7 +79,34 @@ pub async fn current_user(
         username: user.username,
         display_name: user.display_name,
         role: user.role,
+        must_change_password: user.must_change_password,
     }))
+}
+
+/// 退出当前登录会话。
+pub async fn logout(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<(CookieJar, Json<serde_json::Value>), AppError> {
+    let cookie_name = state.config.session_cookie_name.clone();
+    if let Some(cookie) = jar.get(&cookie_name) {
+        let token_hash = hash_session_token(cookie.value());
+        sessions::Entity::delete_many()
+            .filter(sessions::Column::TokenHash.eq(token_hash))
+            .exec(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    let expired = Cookie::build((cookie_name, ""))
+        .http_only(true)
+        .secure(!state.config.allow_http)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .expires(OffsetDateTime::now_utc() - TimeDuration::days(1))
+        .build();
+
+    Ok((jar.add(expired), Json(serde_json::json!({ "status": "ok" }))))
 }
 
 /// 引导创建管理员的请求体。
@@ -509,6 +538,7 @@ pub async fn bootstrap_admin(
         password_hash: Set(None),
         allow_password_login: Set(false),
         password_updated_at: Set(None),
+        must_change_password: Set(false),
         is_active: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
@@ -810,6 +840,13 @@ pub struct PasskeyLoginFinishResponse {
     pub user_id: Uuid,
 }
 
+/// 认证配置响应（用于前端判定内网模式）。
+#[derive(Debug, Serialize)]
+pub struct AuthConfigResponse {
+    /// 重置凭证交付方式（email/code）。
+    pub reset_delivery: String,
+}
+
 /// 完成 Passkey 认证，更新计数并创建会话 Cookie。
 pub async fn passkey_login_finish(
     State(state): State<AppState>,
@@ -895,6 +932,19 @@ pub async fn passkey_login_finish(
     let (jar, user_id) = create_session_cookie(&state, jar, record_user_id).await?;
 
     Ok((jar, Json(PasskeyLoginFinishResponse { user_id })))
+}
+
+/// 获取认证相关配置。
+pub async fn auth_config(
+    State(state): State<AppState>,
+) -> Result<Json<AuthConfigResponse>, AppError> {
+    let reset_delivery = match state.config.reset_delivery {
+        crate::config::ResetDelivery::Email => "email",
+        crate::config::ResetDelivery::Code => "code",
+    };
+    Ok(Json(AuthConfigResponse {
+        reset_delivery: reset_delivery.to_string(),
+    }))
 }
 
 /// 密码登录（仅学生）。
@@ -1181,6 +1231,7 @@ pub async fn change_password(
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(Some(new_hash));
     active.password_updated_at = Set(Some(Utc::now()));
+    active.must_change_password = Set(false);
     active.updated_at = Set(Utc::now());
     active
         .update(&state.db)
@@ -1283,6 +1334,7 @@ pub async fn password_reset_confirm(
     user_active.password_hash = Set(Some(new_hash));
     user_active.allow_password_login = Set(true);
     user_active.password_updated_at = Set(Some(Utc::now()));
+    user_active.must_change_password = Set(false);
     user_active.updated_at = Set(Utc::now());
     user_active
         .update(&state.db)
@@ -1382,6 +1434,7 @@ pub async fn invite_accept(
         password_hash: Set(None),
         allow_password_login: Set(false),
         password_updated_at: Set(None),
+        must_change_password: Set(false),
         is_active: Set(true),
         created_at: Set(now),
         updated_at: Set(now),

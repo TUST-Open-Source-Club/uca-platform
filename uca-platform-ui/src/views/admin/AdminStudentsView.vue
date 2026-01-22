@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { deleteStudent } from '../../api/admin'
+import { createStudentUsers, deleteStudent, resetStudentPassword, updateStudentLogin } from '../../api/admin'
 import { queryStudents, updateStudent } from '../../api/students'
 import { useRequest } from '../../composables/useRequest'
 
@@ -14,6 +14,7 @@ type StudentItem = {
   major: string
   class_name: string
   phone: string
+  allow_password_login: boolean
 }
 
 const tableRef = ref()
@@ -47,6 +48,10 @@ const editForm = reactive({
 const listRequest = useRequest()
 const saveRequest = useRequest()
 const deleteRequest = useRequest()
+const loginRequest = useRequest()
+const resetRequest = useRequest()
+const createUserRequest = useRequest()
+const createUserResult = ref('')
 
 const rules = {
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
@@ -56,6 +61,13 @@ const rules = {
   class_name: [{ required: true, message: '请输入班级', trigger: 'blur' }],
   phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }],
 }
+
+const passwordRule = reactive({
+  prefix: 'st',
+  suffix: '',
+  include_student_no: true,
+  include_phone: false,
+})
 
 const filteredStudents = computed(() => {
   return students.value.filter((item) => {
@@ -151,6 +163,66 @@ const handleBulkDelete = async () => {
   }, { successMessage: '学生已删除' })
 }
 
+const handleAllowLoginChange = async (row: StudentItem, value: boolean) => {
+  await loginRequest.run(async () => {
+    await updateStudentLogin(row.student_no, value)
+    row.allow_password_login = value
+  }, { successMessage: value ? '已允许学生登录' : '已禁止学生登录' })
+}
+
+const handleCreateUsers = async (targets: StudentItem[]) => {
+  if (!targets.length) return
+  const prefix = passwordRule.prefix?.trim() ?? ''
+  const suffix = passwordRule.suffix?.trim() ?? ''
+  if (!prefix && !suffix && !passwordRule.include_student_no && !passwordRule.include_phone) {
+    createUserRequest.error = '请设置密码规则，至少包含一个字段或固定字符串'
+    return
+  }
+  await createUserRequest.run(async () => {
+    const data = await createStudentUsers({
+      student_nos: targets.map((item) => item.student_no),
+      password_rule: { ...passwordRule },
+    })
+    createUserResult.value = JSON.stringify(data, null, 2)
+    await loadStudents()
+  }, { successMessage: '学生用户已创建' })
+}
+
+const handleBulkCreateUsers = async () => {
+  await handleCreateUsers(selection.value)
+}
+
+const handleSingleCreateUser = async (row: StudentItem) => {
+  await handleCreateUsers([row])
+}
+
+const handleResetPassword = async (row: StudentItem) => {
+  const confirmed = await ElMessageBox.confirm(
+    `确认重置 ${row.name}（${row.student_no}）的默认密码？默认密码为 st${row.student_no}。`,
+    '重置密码',
+    { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+  await resetRequest.run(async () => {
+    await resetStudentPassword(row.student_no)
+  }, { successMessage: '密码已重置' })
+}
+
+const handleBulkResetPassword = async () => {
+  if (!selection.value.length) return
+  const confirmed = await ElMessageBox.confirm(
+    `确认重置已选中的 ${selection.value.length} 名学生密码？`,
+    '批量重置密码',
+    { type: 'warning', confirmButtonText: '重置', cancelButtonText: '取消' },
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+  await resetRequest.run(async () => {
+    for (const item of selection.value) {
+      await resetStudentPassword(item.student_no)
+    }
+  }, { successMessage: '密码已批量重置' })
+}
+
 const handleSingleDelete = async (row: StudentItem) => {
   selection.value = [row]
   await handleBulkDelete()
@@ -183,9 +255,36 @@ onMounted(() => {
       </el-form-item>
     </el-form>
 
-    <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end">
+    <div style="margin-top: 12px; border-top: 1px dashed #e5e7eb; padding-top: 12px">
+      <h4 style="margin-bottom: 8px">批量创建学生用户</h4>
+      <el-form label-position="top" style="display: flex; flex-wrap: wrap; gap: 12px">
+        <el-form-item label="密码前缀">
+          <el-input v-model="passwordRule.prefix" placeholder="例如 st" />
+        </el-form-item>
+        <el-form-item label="密码后缀">
+          <el-input v-model="passwordRule.suffix" placeholder="例如 @2024" />
+        </el-form-item>
+        <el-form-item label="包含学号">
+          <el-switch v-model="passwordRule.include_student_no" />
+        </el-form-item>
+        <el-form-item label="包含手机号">
+          <el-switch v-model="passwordRule.include_phone" />
+        </el-form-item>
+      </el-form>
+      <p style="margin-top: 6px; color: var(--muted)">
+        请先在表格中勾选学生，再执行批量创建。生成的密码仅管理员可见。
+      </p>
+    </div>
+
+    <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end">
       <el-button :loading="listRequest.loading" @click="loadStudents">刷新列表</el-button>
       <el-button @click="handleToggleAll">全选</el-button>
+      <el-button type="primary" :disabled="!selection.length" :loading="createUserRequest.loading" @click="handleBulkCreateUsers">
+        批量创建用户
+      </el-button>
+      <el-button type="warning" :disabled="!selection.length" :loading="resetRequest.loading" @click="handleBulkResetPassword">
+        批量重置密码
+      </el-button>
       <el-button type="danger" :disabled="!selection.length" :loading="deleteRequest.loading" @click="handleBulkDelete">
         批量删除
       </el-button>
@@ -206,9 +305,26 @@ onMounted(() => {
       <el-table-column prop="major" label="专业" min-width="160" />
       <el-table-column prop="class_name" label="班级" width="140" />
       <el-table-column prop="phone" label="手机号" width="160" />
-      <el-table-column label="操作" width="140">
+      <el-table-column label="允许登录" width="140">
+        <template #default="{ row }">
+          <el-switch
+            v-model="row.allow_password_login"
+            :loading="loginRequest.loading"
+            active-text="允许"
+            inactive-text="禁止"
+            @change="(value: boolean) => handleAllowLoginChange(row, value)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" :loading="createUserRequest.loading" @click="handleSingleCreateUser(row)">
+            创建用户
+          </el-button>
+          <el-button size="small" type="warning" :loading="resetRequest.loading" @click="handleResetPassword(row)">
+            重置密码
+          </el-button>
           <el-button size="small" type="danger" :loading="deleteRequest.loading" @click="handleSingleDelete(row)">
             删除
           </el-button>
@@ -228,6 +344,11 @@ onMounted(() => {
     />
 
     <el-empty v-if="!filteredStudents.length" description="暂无学生数据" />
+  </el-card>
+
+  <el-card v-if="createUserResult" class="card" style="margin-top: 16px">
+    <h3>创建用户结果</h3>
+    <pre>{{ createUserResult }}</pre>
   </el-card>
 
   <el-dialog v-model="editDialogVisible" title="编辑学生" width="520px">
@@ -261,12 +382,12 @@ onMounted(() => {
   </el-dialog>
 
   <el-alert
-    v-if="listRequest.error || saveRequest.error || deleteRequest.error"
+    v-if="listRequest.error || saveRequest.error || deleteRequest.error || loginRequest.error || resetRequest.error || createUserRequest.error"
     class="card"
     style="margin-top: 24px"
     type="error"
     show-icon
-    :title="listRequest.error || saveRequest.error || deleteRequest.error"
+    :title="listRequest.error || saveRequest.error || deleteRequest.error || loginRequest.error || resetRequest.error || createUserRequest.error"
     :closable="false"
   />
 </template>

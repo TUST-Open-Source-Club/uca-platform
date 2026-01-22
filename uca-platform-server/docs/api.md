@@ -245,7 +245,8 @@
   "id": "<uuid>",
   "username": "20231234",
   "display_name": "张三",
-  "role": "student"
+  "role": "student",
+  "must_change_password": false
 }
 ```
 
@@ -452,6 +453,22 @@
 { "status": "ok" }
 ```
 
+### GET /auth/config
+获取认证相关配置（用于判断内网模式）。
+
+响应：
+```json
+{ "reset_delivery": "email" }
+```
+
+### POST /auth/logout
+退出当前会话，清理 Cookie。
+
+响应：
+```json
+{ "status": "ok" }
+```
+
 ### GET /profile/signature
 获取当前用户签名图片状态（审核/管理员/教师）。
 
@@ -513,7 +530,8 @@
   "department": "信息学院",
   "major": "软件工程",
   "class_name": "软工1班",
-  "phone": "13800000000"
+  "phone": "13800000000",
+  "allow_password_login": false
 }
 ```
 
@@ -540,21 +558,23 @@
   "department": "信息学院",
   "major": "软件工程",
   "class_name": "软工1班",
-  "phone": "13800000000"
+  "phone": "13800000000",
+  "allow_password_login": true
 }]
 ```
 
 ### POST /students/import
-从 Excel 导入学生（仅管理员），multipart 字段 `file`，可选 `field_map` 指定字段映射。
+从 Excel 导入学生（仅管理员），multipart 字段 `file`，可选 `field_map` 指定字段映射，可选 `create_user` 同步创建学生用户。
 
 请求： `multipart/form-data`
 - `file`：腾讯文档导出的 `.xlsx` 文件
 - `field_map`（可选）：JSON 字符串，指定字段到列的映射
-- `allow_login`（可选）：`true/false`，是否允许学生登录（默认 `false`）
+- `create_user`（可选）：`true/false`，是否同步创建学生用户
+- `password_rule`（可选）：JSON 字符串，创建用户时使用的密码规则
 
 响应：
 ```json
-{ "inserted": 120, "updated": 5 }
+{ "inserted": 120, "updated": 5, "created_users": 118, "skipped_users": 2 }
 ```
 
 `field_map` 示例（列可为表头/列字母/列序号）：
@@ -566,9 +586,14 @@
 }
 ```
 
-`allow_login` 示例：
-```
-allow_login=true
+`password_rule` 示例：
+```json
+{
+  "prefix": "st",
+  "suffix": "",
+  "include_student_no": true,
+  "include_phone": false
+}
 ```
 
 标准表头（学生导入）：
@@ -745,7 +770,8 @@ index | major | class_name | student_no | name | planned_hours | module_hours | 
 
 说明：
 - 角色为 `student` 时直接创建用户并设置默认密码 `st+学号`。
-- 其他角色必须提供邮箱，系统发送邀请邮件。
+- 外网模式（RESET_DELIVERY=email）：非学生必须提供邮箱，系统发送邀请邮件。
+- 内网模式（RESET_DELIVERY=code）：非学生无需邮箱，系统返回一次性重置码。
 
 请求：
 ```json
@@ -759,7 +785,12 @@ index | major | class_name | student_no | name | planned_hours | module_hours | 
 
 响应：
 ```json
-{ "user_id": null, "invite_sent": true }
+{ "user_id": null, "invite_sent": true, "reset_code": null, "reset_purpose": null }
+```
+
+内网模式示例：
+```json
+{ "user_id": "<uuid>", "invite_sent": false, "reset_code": "XXXX", "reset_purpose": "totp" }
 ```
 
 ### GET /admin/password-policy
@@ -960,6 +991,62 @@ contest | summary | student_export
 
 说明：仅设置 `is_deleted=1`，已审核记录不会被删除。
 
+### POST /admin/students/{student_no}/restore
+恢复已删除学生（管理员）。
+
+响应：
+```json
+{ "restored": true }
+```
+
+### POST /admin/students/{student_no}/allow-login
+设置学生是否允许密码登录（管理员）。
+
+请求：
+```json
+{ "allow_login": true }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /admin/students/{student_no}/reset-password
+重置学生默认密码（管理员，默认密码为 `st+学号`）。
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /admin/students/create-users
+批量为学生创建用户（管理员）。
+
+请求：
+```json
+{
+  "student_nos": ["2023001", "2023002"],
+  "password_rule": {
+    "prefix": "st",
+    "suffix": "",
+    "include_student_no": true,
+    "include_phone": false
+  }
+}
+```
+
+响应：
+```json
+{
+  "created": 2,
+  "skipped": 0,
+  "passwords": [
+    { "student_no": "2023001", "password": "st2023001" }
+  ]
+}
+```
+
 ### DELETE /admin/purge/students/{student_no}
 彻底删除学生（管理员，仅允许删除已软删除的学生）。
 
@@ -977,6 +1064,14 @@ contest | summary | student_export
 ```
 
 说明：仅允许删除 `status=submitted` 的记录。
+
+### POST /admin/records/contest/{record_id}/restore
+恢复已删除竞赛记录（管理员）。
+
+响应：
+```json
+{ "restored": true }
+```
 
 ### DELETE /admin/purge/records/contest/{record_id}
 彻底删除竞赛记录（管理员，仅允许删除已软删除的记录）。

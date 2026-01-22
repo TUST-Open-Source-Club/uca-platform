@@ -8,6 +8,7 @@ mod m20250210_000003_add_soft_delete;
 mod m20250212_000004_auth_invites_and_passwords;
 mod m20250215_000005_labor_hours_templates;
 mod m20250220_000006_user_signatures;
+mod m20260122_000007_force_password_change;
 
 /// Labor Hours Platform 数据库迁移器。
 pub struct Migrator;
@@ -18,10 +19,11 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20250121_000001_create_auth_tables::Migration),
             Box::new(m20250121_000002_create_core_tables::Migration),
-        Box::new(m20250210_000003_add_soft_delete::Migration),
-        Box::new(m20250212_000004_auth_invites_and_passwords::Migration),
+            Box::new(m20250210_000003_add_soft_delete::Migration),
+            Box::new(m20250212_000004_auth_invites_and_passwords::Migration),
             Box::new(m20250215_000005_labor_hours_templates::Migration),
             Box::new(m20250220_000006_user_signatures::Migration),
+            Box::new(m20260122_000007_force_password_change::Migration),
         ]
     }
 }

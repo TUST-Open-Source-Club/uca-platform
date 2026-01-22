@@ -12,7 +12,8 @@
       "env": {
         "DEVELOPER_MODE": "true",
         "ALLOW_HTTP": "true",
-        "RUST_LOG": "info"
+        "RUST_LOG": "info",
+        "RESET_DELIVERY": "code"
       }
     }
   ]

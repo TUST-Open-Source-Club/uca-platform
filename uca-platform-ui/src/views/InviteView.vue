@@ -106,14 +106,15 @@ const handleTotpFinish = async () => {
 }
 
 const handlePasskeyRegister = async () => {
-  if (!info.value?.username) {
+  const username = info.value?.username
+  if (!username) {
     throw new Error('缺少用户名')
   }
   await passkeyRequest.run(async () => {
     if (!window.PublicKeyCredential) {
       throw new Error('当前浏览器不支持 Passkey')
     }
-    const data = await passkeyRegisterStart(info.value.username)
+    const data = await passkeyRegisterStart(username)
     const options = normalizeCreationOptions(
       data.public_key as unknown as PublicKeyCredentialCreationOptions,
     )

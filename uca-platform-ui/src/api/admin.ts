@@ -91,8 +91,52 @@ export async function deleteStudent(studentNo: string): Promise<unknown> {
   return requestJson(`/admin/students/${encodeURIComponent(studentNo)}`, { method: 'DELETE' })
 }
 
+export async function restoreStudent(studentNo: string): Promise<unknown> {
+  return requestJson(`/admin/students/${encodeURIComponent(studentNo)}/restore`, { method: 'POST' })
+}
+
+export async function updateStudentLogin(studentNo: string, allowLogin: boolean): Promise<unknown> {
+  return requestJson(`/admin/students/${encodeURIComponent(studentNo)}/allow-login`, {
+    method: 'POST',
+    body: JSON.stringify({ allow_login: allowLogin }),
+  })
+}
+
+export async function resetStudentPassword(studentNo: string): Promise<unknown> {
+  return requestJson(`/admin/students/${encodeURIComponent(studentNo)}/reset-password`, {
+    method: 'POST',
+  })
+}
+
+export type StudentPasswordRule = {
+  prefix?: string
+  suffix?: string
+  include_student_no: boolean
+  include_phone: boolean
+}
+
+export type CreateStudentUsersResponse = {
+  created: number
+  skipped: number
+  passwords: { student_no: string; password: string }[]
+}
+
+export async function createStudentUsers(payload: {
+  student_nos: string[]
+  password_rule: StudentPasswordRule
+}): Promise<CreateStudentUsersResponse> {
+  return requestJson('/admin/students/create-users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function deleteContestRecord(recordId: string): Promise<unknown> {
   return requestJson(`/admin/records/contest/${recordId}`, { method: 'DELETE' })
+}
+
+export async function restoreContestRecord(recordId: string): Promise<unknown> {
+  return requestJson(`/admin/records/contest/${recordId}/restore`, { method: 'POST' })
 }
 
 export async function listDeletedStudents(): Promise<unknown[]> {
@@ -116,7 +160,8 @@ export async function createUser(payload: {
   display_name: string
   role: 'student' | 'teacher' | 'reviewer' | 'admin'
   email?: string
-}): Promise<{ user_id?: string; invite_sent: boolean }> {
+  reset_purpose?: 'totp' | 'passkey'
+}): Promise<{ user_id?: string; invite_sent: boolean; reset_code?: string; reset_purpose?: string }> {
   return requestJson('/admin/users', {
     method: 'POST',
     body: JSON.stringify(payload),

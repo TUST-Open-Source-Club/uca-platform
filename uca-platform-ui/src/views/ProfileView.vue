@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { UploadFile } from 'element-plus'
+import { logout as logoutRequest } from '../api/auth'
 import { getSignatureProfile, uploadSignatureImage } from '../api/profile'
 import { useRequest } from '../composables/useRequest'
+import { useAuthStore } from '../stores/auth'
 
 const signatureFile = ref<File | null>(null)
 const profileRequest = useRequest()
 const uploadRequest = useRequest()
+const logoutState = useRequest()
 const profile = ref<{ uploaded: boolean; signature_path?: string | null }>({ uploaded: false })
+const router = useRouter()
+const authStore = useAuthStore()
 
 const loadProfile = async () => {
   await profileRequest.run(async () => {
@@ -28,6 +34,14 @@ const handleUpload = async () => {
     profile.value = await uploadSignatureImage(signatureFile.value as File)
     signatureFile.value = null
   }, { successMessage: '签名已更新' })
+}
+
+const handleLogout = async () => {
+  await logoutState.run(async () => {
+    await logoutRequest()
+    authStore.logout()
+    await router.push('/login')
+  }, { successMessage: '已退出登录' })
 }
 
 onMounted(() => {
@@ -54,13 +68,23 @@ onMounted(() => {
     </el-button>
   </el-card>
 
+  <el-card class="card">
+    <h3>账号操作</h3>
+    <p style="margin-bottom: 12px; color: var(--muted)">
+      退出登录后需要重新完成认证。
+    </p>
+    <el-button type="danger" :loading="logoutState.loading" @click="handleLogout">
+      退出登录
+    </el-button>
+  </el-card>
+
   <el-alert
-    v-if="profileRequest.error || uploadRequest.error"
+    v-if="profileRequest.error || uploadRequest.error || logoutState.error"
     class="card"
     style="margin-top: 24px"
     type="error"
     show-icon
-    :title="profileRequest.error || uploadRequest.error"
+    :title="profileRequest.error || uploadRequest.error || logoutState.error"
     :closable="false"
   />
 </template>

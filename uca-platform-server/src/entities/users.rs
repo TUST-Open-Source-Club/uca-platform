@@ -14,6 +14,7 @@ pub struct Model {
     pub password_hash: Option<String>,
     pub allow_password_login: bool,
     pub password_updated_at: Option<DateTimeUtc>,
+    pub must_change_password: bool,
     pub is_active: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,

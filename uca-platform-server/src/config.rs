@@ -183,13 +183,17 @@ impl Config {
                 .or_else(|| file_ref.and_then(|cfg| cfg.rp_id.clone()))
                 .ok_or_else(|| AppError::config("RP_ID is required"))?
         };
-        let default_origin = if allow_http {
-            "http://localhost:8443"
+        let dev_origin = if allow_http {
+            "http://localhost:5173"
         } else {
-            "https://localhost:8443"
+            "https://localhost:5173"
         };
         let rp_origin = if developer_mode {
-            default_origin
+            let origin = env::var("RP_ORIGIN")
+                .ok()
+                .or_else(|| file_ref.and_then(|cfg| cfg.rp_origin.clone()))
+                .unwrap_or_else(|| dev_origin.to_string());
+            origin
                 .parse::<Url>()
                 .map_err(|_| AppError::config("RP_ORIGIN must be a valid URL"))?
         } else {

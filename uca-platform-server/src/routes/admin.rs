@@ -96,6 +96,8 @@ pub struct CreateUserRequest {
     /// 邮箱（非学生必须提供）。
     #[validate(email)]
     pub email: Option<String>,
+    /// 内网模式下的认证重置用途（totp/passkey）。
+    pub reset_purpose: Option<String>,
 }
 
 /// 新建用户响应。
@@ -105,6 +107,10 @@ pub struct CreateUserResponse {
     pub user_id: Option<Uuid>,
     /// 是否已发送邀请邮件。
     pub invite_sent: bool,
+    /// 内网模式下生成的重置码。
+    pub reset_code: Option<String>,
+    /// 重置用途（totp/passkey）。
+    pub reset_purpose: Option<String>,
 }
 
 /// 密码策略配置请求。
@@ -400,6 +406,7 @@ pub async fn create_user(
                 active.password_hash = Set(Some(hash));
             }
             active.allow_password_login = Set(true);
+            active.must_change_password = Set(true);
             active.updated_at = Set(now);
             let model = active
                 .update(&state.db)
@@ -408,6 +415,8 @@ pub async fn create_user(
             return Ok(Json(CreateUserResponse {
                 user_id: Some(model.id),
                 invite_sent: false,
+                reset_code: None,
+                reset_purpose: None,
             }));
         }
 
@@ -421,6 +430,7 @@ pub async fn create_user(
             password_hash: Set(Some(hash)),
             allow_password_login: Set(true),
             password_updated_at: Set(Some(now)),
+            must_change_password: Set(true),
             is_active: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
@@ -433,6 +443,72 @@ pub async fn create_user(
         return Ok(Json(CreateUserResponse {
             user_id: Some(user_id),
             invite_sent: false,
+            reset_code: None,
+            reset_purpose: None,
+        }));
+    }
+
+    let existing = User::find()
+        .filter(users::Column::Username.eq(&payload.username))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if existing.is_some() {
+        return Err(AppError::bad_request("user already exists"));
+    }
+
+    if matches!(state.config.reset_delivery, crate::config::ResetDelivery::Code) {
+        let now = Utc::now();
+        let user_id = Uuid::new_v4();
+        let model = users::ActiveModel {
+            id: Set(user_id),
+            username: Set(payload.username.clone()),
+            display_name: Set(payload.display_name.clone()),
+            role: Set(payload.role.clone()),
+            email: Set(payload.email.clone()),
+            password_hash: Set(None),
+            allow_password_login: Set(false),
+            password_updated_at: Set(None),
+            must_change_password: Set(false),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        users::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+
+        let purpose = payload
+            .reset_purpose
+            .clone()
+            .unwrap_or_else(|| "totp".to_string());
+        if !matches!(purpose.as_str(), "totp" | "passkey") {
+            return Err(AppError::validation("invalid reset purpose"));
+        }
+
+        let token = generate_token();
+        let token_hash = hash_token(&token);
+        let expires_at = now + ChronoDuration::minutes(RESET_TTL_MINUTES);
+        let reset = auth_resets::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            token_hash: Set(token_hash),
+            user_id: Set(user_id),
+            purpose: Set(purpose.clone()),
+            expires_at: Set(expires_at),
+            created_at: Set(now),
+            used_at: Set(None),
+        };
+        auth_resets::Entity::insert(reset)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+
+        return Ok(Json(CreateUserResponse {
+            user_id: Some(user_id),
+            invite_sent: false,
+            reset_code: Some(token),
+            reset_purpose: Some(purpose),
         }));
     }
 
@@ -450,15 +526,6 @@ pub async fn create_user(
         .mail
         .as_ref()
         .ok_or_else(|| AppError::config("mail config required"))?;
-
-    let existing = User::find()
-        .filter(users::Column::Username.eq(&payload.username))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-    if existing.is_some() {
-        return Err(AppError::bad_request("user already exists"));
-    }
 
     let token = generate_token();
     let token_hash = hash_token(&token);
@@ -491,6 +558,8 @@ pub async fn create_user(
     Ok(Json(CreateUserResponse {
         user_id: None,
         invite_sent: true,
+        reset_code: None,
+        reset_purpose: None,
     }))
 }
 
@@ -1068,6 +1137,277 @@ pub struct DeletedContestRecordResponse {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// 更新学生登录权限请求。
+#[derive(Debug, Deserialize)]
+pub struct UpdateStudentLoginRequest {
+    /// 是否允许学生使用密码登录。
+    pub allow_login: bool,
+}
+
+/// 学生用户密码规则。
+#[derive(Debug, Deserialize)]
+pub struct StudentPasswordRule {
+    /// 固定前缀。
+    pub prefix: Option<String>,
+    /// 固定后缀。
+    pub suffix: Option<String>,
+    /// 是否包含学号。
+    pub include_student_no: bool,
+    /// 是否包含手机号。
+    pub include_phone: bool,
+}
+
+/// 批量为学生创建用户请求。
+#[derive(Debug, Deserialize)]
+pub struct CreateStudentUsersRequest {
+    /// 学号列表。
+    pub student_nos: Vec<String>,
+    /// 密码生成规则。
+    pub password_rule: StudentPasswordRule,
+}
+
+/// 批量创建学生用户响应。
+#[derive(Debug, Serialize)]
+pub struct CreateStudentUsersResponse {
+    /// 成功创建数量。
+    pub created: usize,
+    /// 已存在跳过数量。
+    pub skipped: usize,
+    /// 生成的密码清单。
+    pub passwords: Vec<GeneratedStudentPassword>,
+}
+
+/// 生成的学生密码条目。
+#[derive(Debug, Serialize)]
+pub struct GeneratedStudentPassword {
+    /// 学号。
+    pub student_no: String,
+    /// 生成的密码。
+    pub password: String,
+}
+
+fn build_student_password(
+    rule: &StudentPasswordRule,
+    student: &students::Model,
+) -> Result<String, AppError> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(prefix) = rule.prefix.as_ref() {
+        if !prefix.is_empty() {
+            parts.push(prefix.clone());
+        }
+    }
+    if rule.include_student_no {
+        parts.push(student.student_no.clone());
+    }
+    if rule.include_phone {
+        if student.phone.is_empty() {
+            return Err(AppError::bad_request("student phone missing"));
+        }
+        parts.push(student.phone.clone());
+    }
+    if let Some(suffix) = rule.suffix.as_ref() {
+        if !suffix.is_empty() {
+            parts.push(suffix.clone());
+        }
+    }
+    let password = parts.join("");
+    if password.is_empty() {
+        return Err(AppError::bad_request("password rule produces empty password"));
+    }
+    Ok(password)
+}
+
+/// 修改学生是否允许密码登录（仅管理员）。
+pub async fn update_student_login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+    Json(payload): Json<UpdateStudentLoginRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .filter(students::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    let now = Utc::now();
+    if let Some(existing) = User::find()
+        .filter(users::Column::Username.eq(&student.student_no))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+    {
+        let mut active: users::ActiveModel = existing.into();
+        active.allow_password_login = Set(payload.allow_login);
+        if payload.allow_login {
+            active.must_change_password = Set(true);
+        }
+        active.updated_at = Set(now);
+        active
+            .update(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    } else {
+        let default_password = format!("st{}", student.student_no);
+        let default_hash = hash_password(&default_password)?;
+        let model = users::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(student.student_no.clone()),
+            display_name: Set(student.name.clone()),
+            role: Set("student".to_string()),
+            email: Set(None),
+            password_hash: Set(Some(default_hash)),
+            allow_password_login: Set(payload.allow_login),
+            password_updated_at: Set(Some(now)),
+            must_change_password: Set(payload.allow_login),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        users::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+/// 批量为学生创建用户（仅管理员）。
+pub async fn create_student_users(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<CreateStudentUsersRequest>,
+) -> Result<Json<CreateStudentUsersResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    if payload.student_nos.is_empty() {
+        return Err(AppError::bad_request("student_nos required"));
+    }
+
+    let students_list = Student::find()
+        .filter(students::Column::StudentNo.is_in(payload.student_nos.clone()))
+        .filter(students::Column::IsDeleted.eq(false))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let mut created = 0usize;
+    let mut skipped = 0usize;
+    let mut passwords = Vec::new();
+    let now = Utc::now();
+
+    for student in students_list {
+        let exists = User::find()
+            .filter(users::Column::Username.eq(&student.student_no))
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        if exists.is_some() {
+            skipped += 1;
+            continue;
+        }
+        let password = build_student_password(&payload.password_rule, &student)?;
+        let hash = hash_password(&password)?;
+        let user_id = Uuid::new_v4();
+        let model = users::ActiveModel {
+            id: Set(user_id),
+            username: Set(student.student_no.clone()),
+            display_name: Set(student.name.clone()),
+            role: Set("student".to_string()),
+            email: Set(None),
+            password_hash: Set(Some(hash)),
+            allow_password_login: Set(true),
+            password_updated_at: Set(Some(now)),
+            must_change_password: Set(true),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        users::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        passwords.push(GeneratedStudentPassword {
+            student_no: student.student_no,
+            password,
+        });
+        created += 1;
+    }
+
+    Ok(Json(CreateStudentUsersResponse {
+        created,
+        skipped,
+        passwords,
+    }))
+}
+
+/// 重置学生默认密码（仅管理员）。
+pub async fn reset_student_password(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .filter(students::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    let default_password = format!("st{}", student.student_no);
+    let default_hash = hash_password(&default_password)?;
+    let now = Utc::now();
+    if let Some(existing) = User::find()
+        .filter(users::Column::Username.eq(&student.student_no))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+    {
+        let mut active: users::ActiveModel = existing.into();
+        active.password_hash = Set(Some(default_hash));
+        active.allow_password_login = Set(true);
+        active.password_updated_at = Set(Some(now));
+        active.must_change_password = Set(true);
+        active.updated_at = Set(now);
+        active
+            .update(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    } else {
+        let model = users::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(student.student_no.clone()),
+            display_name: Set(student.name.clone()),
+            role: Set("student".to_string()),
+            email: Set(None),
+            password_hash: Set(Some(default_hash)),
+            allow_password_login: Set(true),
+            password_updated_at: Set(Some(now)),
+            must_change_password: Set(true),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        users::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
 /// 获取已删除学生列表（仅管理员）。
 pub async fn list_deleted_students(
     State(state): State<AppState>,
@@ -1082,10 +1422,28 @@ pub async fn list_deleted_students(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
+    let usernames: Vec<String> = results.iter().map(|item| item.student_no.clone()).collect();
+    let user_records = if usernames.is_empty() {
+        Vec::new()
+    } else {
+        User::find()
+            .filter(users::Column::Username.is_in(usernames))
+            .all(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+    };
+    let mut allow_map = HashMap::new();
+    for record in user_records {
+        allow_map.insert(record.username, record.allow_password_login);
+    }
+
     Ok(Json(
         results
             .into_iter()
-            .map(crate::routes::students::StudentResponse::from)
+            .map(|model| {
+                let allow = allow_map.get(&model.student_no).copied().unwrap_or(false);
+                crate::routes::students::StudentResponse::from_model(model, allow)
+            })
             .collect(),
     ))
 }
@@ -1147,6 +1505,37 @@ pub async fn delete_student(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 恢复已删除学生（仅管理员）。
+pub async fn restore_student(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(student_no): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&student_no))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+
+    if !student.is_deleted {
+        return Ok(Json(serde_json::json!({ "restored": true })));
+    }
+
+    let mut active: students::ActiveModel = student.into();
+    active.is_deleted = Set(false);
+    active.updated_at = Set(Utc::now());
+    active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "restored": true })))
 }
 
 /// 彻底删除学生（仅管理员）。
@@ -1251,6 +1640,34 @@ pub async fn delete_contest_record(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// 恢复已删除竞赛记录（仅管理员）。
+pub async fn restore_contest_record(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(record_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let record = ContestRecord::find()
+        .filter(contest_records::Column::Id.eq(record_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("record not found"))?;
+    if !record.is_deleted {
+        return Ok(Json(serde_json::json!({ "restored": true })));
+    }
+    let mut active: contest_records::ActiveModel = record.into();
+    active.is_deleted = Set(false);
+    active.updated_at = Set(Utc::now());
+    active
+        .update(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Ok(Json(serde_json::json!({ "restored": true })))
 }
 
 /// 彻底删除竞赛记录（仅管理员）。

@@ -5,12 +5,14 @@ import { createContest } from '../api/records'
 import { bindEmail, changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
 import { useRequest } from '../composables/useRequest'
+import { useAuthStore } from '../stores/auth'
 
 const contestFormRef = ref()
 const result = ref('')
 const contestRequest = useRequest()
 const fieldRequest = useRequest()
 const accountRequest = useRequest()
+const authStore = useAuthStore()
 
 const contestFields = ref<FormField[]>([])
 const competitions = ref<CompetitionItem[]>([])
@@ -178,12 +180,13 @@ const handleChangePassword = async () => {
   if (!accountFormRef.value) return
   await accountFormRef.value.validate(async (valid: boolean) => {
     if (!valid) return
-    await accountRequest.run(async () => {
-      await changePassword({
-        current_password: accountForm.current_password,
-        new_password: accountForm.new_password,
-      })
-    }, { successMessage: '密码已更新' })
+  await accountRequest.run(async () => {
+    await changePassword({
+      current_password: accountForm.current_password,
+      new_password: accountForm.new_password,
+    })
+    await authStore.refreshSession()
+  }, { successMessage: '密码已更新' })
   })
 }
 </script>
@@ -193,6 +196,15 @@ const handleChangePassword = async () => {
     <h1>学生中心</h1>
     <p>提交竞赛获奖与劳动教育学时认定申请。</p>
   </section>
+
+  <el-alert
+    v-if="authStore.mustChangePassword"
+    class="card"
+    type="warning"
+    show-icon
+    title="首次登录或重置后必须修改密码，请先在下方完成密码修改。"
+    :closable="false"
+  />
 
   <div class="card-grid">
     <el-card class="card">

@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
+
+onMounted(() => {
+  void auth.ensureConfig()
+})
 
 const navItems = computed(() => {
   if (!auth.loggedIn) {
@@ -31,11 +35,14 @@ const navItems = computed(() => {
     items.push({ path: '/admin/competitions', label: '竞赛库管理' })
     items.push({ path: '/admin/form-fields', label: '模板配置' })
     items.push({ path: '/admin/students', label: '学生名单管理' })
-    items.push({ path: '/admin/soft-delete', label: '数据删除（软删除）' })
+    items.push({ path: '/purge', label: '清理已删除' })
     items.push({ path: '/admin/users', label: '创建用户 / 邀请' })
     items.push({ path: '/admin/password-policy', label: '密码策略' })
-    items.push({ path: '/admin/auth-reset', label: '认证重置' })
-    items.push({ path: '/admin/reset-code', label: '一次性重置码' })
+    if (auth.resetDelivery === 'code') {
+      items.push({ path: '/admin/reset-code', label: '一次性重置码' })
+    } else {
+      items.push({ path: '/admin/auth-reset', label: '认证重置' })
+    }
   }
 
   items.push({ path: '/devices', label: '设备与认证' })

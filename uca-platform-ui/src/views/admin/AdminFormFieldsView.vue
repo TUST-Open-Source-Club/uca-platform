@@ -140,6 +140,9 @@ onMounted(() => {
       <div class="card-grid">
         <el-card class="card">
           <h3>新增字段</h3>
+          <p style="margin-bottom: 12px; color: var(--muted)">
+            字段用于学生填报与审核表格展示；字段 Key 将作为导入/导出映射的标识，请保持唯一且稳定。
+          </p>
           <el-form ref="formFieldRef" :model="formField" :rules="formFieldRules" label-position="top">
             <el-form-item label="字段 Key" prop="field_key">
               <el-input v-model="formField.field_key" placeholder="location" />
@@ -183,7 +186,10 @@ onMounted(() => {
     <el-tab-pane label="导出模板" name="export">
       <el-card class="card">
         <h3>上传劳动教育学时认定 PDF 模板</h3>
-        <p>请上传包含占位符的 Excel 文件，后端将校验并用于导出 PDF。</p>
+        <p>
+          请上传包含占位符的 Excel 文件，后端将校验并用于导出 PDF。占位符规则请参考
+          README 的“PDF 导出模板”说明。
+        </p>
         <el-upload
           :auto-upload="false"
           :limit="1"
@@ -219,6 +225,9 @@ onMounted(() => {
 
     <el-tab-pane label="学时规则" name="rules">
       <el-card class="card">
+        <p style="margin-bottom: 12px; color: var(--muted)">
+          学时规则用于自动计算推荐学时，最终学时以审核人员填写为准。
+        </p>
         <el-form label-position="top" style="max-width: 360px">
           <el-form-item label="A 类基础学时">
             <el-input-number v-model="laborRules.base_hours_a" :min="0" />

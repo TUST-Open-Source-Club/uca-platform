@@ -23,7 +23,7 @@ vi.mock('../api/forms', () => ({
   listFormFieldsByType: vi.fn().mockResolvedValue([
     {
       id: '1',
-      form_type: 'volunteer',
+      form_type: 'contest',
       field_key: 'location',
       label: '地点',
       field_type: 'text',
@@ -40,7 +40,6 @@ vi.mock('../api/catalog', () => ({
 vi.mock('../api/records', () => ({
   createVolunteer: vi.fn().mockResolvedValue({}),
   createContest: vi.fn().mockResolvedValue({}),
-  queryVolunteer: vi.fn().mockResolvedValue([]),
   queryContest: vi.fn().mockResolvedValue([]),
   reviewVolunteer: vi.fn().mockResolvedValue({}),
   reviewContest: vi.fn().mockResolvedValue({}),

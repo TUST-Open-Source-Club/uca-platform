@@ -1,32 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { listCompetitionsPublic } from '../api/catalog'
-import { createContest, createVolunteer } from '../api/records'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { listCompetitionsPublic, type CompetitionItem } from '../api/catalog'
+import { createContest } from '../api/records'
 import { bindEmail, changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
 import { useRequest } from '../composables/useRequest'
 
-const volunteerFormRef = ref()
 const contestFormRef = ref()
 const result = ref('')
-const volunteerRequest = useRequest()
 const contestRequest = useRequest()
 const fieldRequest = useRequest()
 const accountRequest = useRequest()
 
-const volunteerFields = ref<FormField[]>([])
 const contestFields = ref<FormField[]>([])
-const competitions = ref<{ id: string; name: string }[]>([])
-
-const volunteerForm = reactive<Record<string, string | number>>({
-  title: '',
-  self_hours: 0,
-  description: '',
-})
+const competitions = ref<CompetitionItem[]>([])
 
 const contestForm = reactive<Record<string, string | number>>({
   contest_name: '',
+  contest_year: 0,
+  contest_category: '',
+  contest_level: '',
+  contest_role: '',
   award_level: '',
+  award_date: '',
   self_hours: 0,
 })
 
@@ -62,16 +58,10 @@ const validateHours = (_: unknown, value: number, callback: (error?: Error) => v
   callback()
 }
 
-const volunteerRules = reactive<Record<string, unknown>>({
-  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
-  self_hours: [
-    { required: true, message: '请输入学时', trigger: 'change' },
-    { validator: validateHours, trigger: 'change' },
-  ],
-})
-
 const contestRules = reactive<Record<string, unknown>>({
   contest_name: [{ required: true, message: '请输入竞赛名称', trigger: 'blur' }],
+  contest_level: [{ required: true, message: '请选择竞赛级别', trigger: 'change' }],
+  contest_role: [{ required: true, message: '请选择角色', trigger: 'change' }],
   award_level: [{ required: true, message: '请输入获奖等级', trigger: 'blur' }],
   self_hours: [
     { required: true, message: '请输入学时', trigger: 'change' },
@@ -108,17 +98,13 @@ const extractCustomFields = (fields: FormField[], form: Record<string, string | 
 
 const loadFields = async () => {
   await fieldRequest.run(async () => {
-    const [volunteer, contest, competitionList] = await Promise.all([
-      listFormFieldsByType('volunteer'),
+    const [contest, competitionList] = await Promise.all([
       listFormFieldsByType('contest'),
       listCompetitionsPublic(),
     ])
-    volunteerFields.value = volunteer
     contestFields.value = contest
     competitions.value = competitionList
-    applyFieldDefaults(volunteerForm, volunteer)
     applyFieldDefaults(contestForm, contest)
-    applyFieldRules(volunteerRules, volunteer)
     applyFieldRules(contestRules, contest)
   })
 }
@@ -136,25 +122,20 @@ onMounted(() => {
   void loadPasswordPolicy()
 })
 
-const handleVolunteerSubmit = async () => {
-  if (!volunteerFormRef.value) return
-  await volunteerFormRef.value.validate(async (valid: boolean) => {
-    if (!valid) return
-    result.value = ''
-    await volunteerRequest.run(
-      async () => {
-        const data = await createVolunteer({
-          title: String(volunteerForm.title),
-          description: String(volunteerForm.description),
-          self_hours: Number(volunteerForm.self_hours),
-          custom_fields: extractCustomFields(volunteerFields.value, volunteerForm),
-        })
-        result.value = JSON.stringify(data, null, 2)
-      },
-      { successMessage: '已提交志愿服务' },
-    )
-  })
-}
+watch(
+  () => contestForm.contest_name,
+  (value) => {
+    if (!value) return
+    const match = competitions.value.find((item) => item.name === String(value))
+    if (!match) return
+    if (match.year) {
+      contestForm.contest_year = match.year
+    }
+    if (match.category) {
+      contestForm.contest_category = match.category
+    }
+  },
+)
 
 const handleContestSubmit = async () => {
   if (!contestFormRef.value) return
@@ -165,7 +146,14 @@ const handleContestSubmit = async () => {
       async () => {
         const data = await createContest({
           contest_name: String(contestForm.contest_name),
+          contest_year: contestForm.contest_year ? Number(contestForm.contest_year) : null,
+          contest_category: contestForm.contest_category
+            ? String(contestForm.contest_category)
+            : null,
+          contest_level: contestForm.contest_level ? String(contestForm.contest_level) : null,
+          contest_role: contestForm.contest_role ? String(contestForm.contest_role) : null,
           award_level: String(contestForm.award_level),
+          award_date: contestForm.award_date ? String(contestForm.award_date) : null,
           self_hours: Number(contestForm.self_hours),
           custom_fields: extractCustomFields(contestFields.value, contestForm),
         })
@@ -203,45 +191,10 @@ const handleChangePassword = async () => {
 <template>
   <section class="hero">
     <h1>学生中心</h1>
-    <p>提交志愿服务与竞赛获奖记录，跟踪审核进度。</p>
+    <p>提交竞赛获奖与劳动教育学时认定申请。</p>
   </section>
 
   <div class="card-grid">
-    <el-card class="card">
-      <h3>志愿服务填报</h3>
-      <el-form ref="volunteerFormRef" :model="volunteerForm" :rules="volunteerRules" label-position="top">
-        <el-form-item label="标题" prop="title">
-          <el-input v-model="volunteerForm.title" placeholder="活动名称" />
-        </el-form-item>
-        <el-form-item label="自评学时" prop="self_hours">
-          <el-input-number v-model="volunteerForm.self_hours" :min="0" />
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="volunteerForm.description" type="textarea" rows="3" />
-        </el-form-item>
-        <el-form-item
-          v-for="field in volunteerFields"
-          :key="field.id"
-          :label="field.label"
-          :prop="field.field_key"
-        >
-          <el-input
-            v-if="field.field_type !== 'number'"
-            v-model="volunteerForm[field.field_key]"
-            :placeholder="field.label"
-          />
-          <el-input-number
-            v-else
-            v-model="volunteerForm[field.field_key]"
-            :min="0"
-          />
-        </el-form-item>
-        <el-button type="primary" :loading="volunteerRequest.loading" @click="handleVolunteerSubmit">
-          提交
-        </el-button>
-      </el-form>
-    </el-card>
-
     <el-card class="card">
       <h3>竞赛获奖填报</h3>
       <el-form ref="contestFormRef" :model="contestForm" :rules="contestRules" label-position="top">
@@ -250,8 +203,38 @@ const handleChangePassword = async () => {
             <el-option v-for="item in competitions" :key="item.id" :label="item.name" :value="item.name" />
           </el-select>
         </el-form-item>
+        <el-form-item label="竞赛年份">
+          <el-input-number v-model="contestForm.contest_year" :min="2000" :max="2100" />
+        </el-form-item>
+        <el-form-item label="竞赛类型（A/B）">
+          <el-select v-model="contestForm.contest_category" placeholder="选择类型">
+            <el-option label="A 类" value="A" />
+            <el-option label="B 类" value="B" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="竞赛级别" prop="contest_level">
+          <el-select v-model="contestForm.contest_level" placeholder="选择级别">
+            <el-option label="国家级" value="国家级" />
+            <el-option label="省级" value="省级" />
+            <el-option label="校级" value="校级" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="角色" prop="contest_role">
+          <el-select v-model="contestForm.contest_role" placeholder="选择角色">
+            <el-option label="负责人" value="负责人" />
+            <el-option label="成员" value="成员" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="获奖等级" prop="award_level">
           <el-input v-model="contestForm.award_level" placeholder="例如 省赛一等奖" />
+        </el-form-item>
+        <el-form-item label="获奖时间">
+          <el-date-picker
+            v-model="contestForm.award_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择日期"
+          />
         </el-form-item>
         <el-form-item label="自评学时" prop="self_hours">
           <el-input-number v-model="contestForm.self_hours" :min="0" />
@@ -314,12 +297,12 @@ const handleChangePassword = async () => {
   </el-card>
 
   <el-alert
-    v-if="volunteerRequest.error || contestRequest.error || fieldRequest.error || accountRequest.error"
+    v-if="contestRequest.error || fieldRequest.error || accountRequest.error"
     class="card"
     style="margin-top: 16px"
     type="error"
     show-icon
-    :title="volunteerRequest.error || contestRequest.error || fieldRequest.error || accountRequest.error"
+    :title="contestRequest.error || fieldRequest.error || accountRequest.error"
     :closable="false"
   />
 </template>

@@ -1,4 +1,4 @@
-//! UCA Platform 服务端配置加载。
+//! Labor Hours Platform 服务端配置加载。
 
 use std::{env, fs};
 use std::path::PathBuf;

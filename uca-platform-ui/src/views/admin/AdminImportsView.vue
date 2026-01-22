@@ -4,24 +4,20 @@ import type { UploadFile } from 'element-plus'
 import {
   importCompetitions,
   importContestRecords,
-  importVolunteerRecords,
 } from '../../api/admin'
 import { importStudents } from '../../api/students'
 import { useRequest } from '../../composables/useRequest'
 
 const importFormRef = ref()
 const competitionImportRef = ref()
-const volunteerImportRef = ref()
 const contestImportRef = ref()
 const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
-const volunteerImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
 const result = ref('')
 
 const importRequest = useRequest()
 const competitionImportRequest = useRequest()
-const volunteerImportRequest = useRequest()
 const contestImportRequest = useRequest()
 
 const importForm = reactive({
@@ -29,10 +25,6 @@ const importForm = reactive({
 })
 
 const competitionImportForm = reactive({
-  fileName: '',
-})
-
-const volunteerImportForm = reactive({
   fileName: '',
 })
 
@@ -46,10 +38,6 @@ const importRules = {
 
 const competitionImportRules = {
   fileName: [{ required: true, message: '请选择竞赛库 Excel 文件', trigger: 'change' }],
-}
-
-const volunteerImportRules = {
-  fileName: [{ required: true, message: '请选择志愿服务导入文件', trigger: 'change' }],
 }
 
 const contestImportRules = {
@@ -89,22 +77,6 @@ const handleCompetitionImport = async () => {
 const handleCompetitionFileChange = (file: UploadFile) => {
   competitionImportFile.value = file.raw ?? null
   competitionImportForm.fileName = file.name ?? ''
-}
-
-const handleVolunteerImport = async () => {
-  if (!volunteerImportRef.value) return
-  await volunteerImportRef.value.validate(async (valid: boolean) => {
-    if (!valid) return
-    await volunteerImportRequest.run(async () => {
-      const data = await importVolunteerRecords(volunteerImportFile.value as File)
-      result.value = JSON.stringify(data, null, 2)
-    }, { successMessage: '志愿服务记录已导入' })
-  })
-}
-
-const handleVolunteerFileChange = (file: UploadFile) => {
-  volunteerImportFile.value = file.raw ?? null
-  volunteerImportForm.fileName = file.name ?? ''
 }
 
 const handleContestImport = async () => {
@@ -180,30 +152,6 @@ const handleContestFileChange = (file: UploadFile) => {
     </el-card>
 
     <el-card class="card">
-      <h3>志愿服务记录导入</h3>
-      <el-form ref="volunteerImportRef" :model="volunteerImportForm" :rules="volunteerImportRules" label-position="top">
-        <el-form-item label="志愿服务 Excel" prop="fileName">
-          <el-upload
-            :auto-upload="false"
-            :limit="1"
-            :show-file-list="true"
-            :on-change="handleVolunteerFileChange"
-          >
-            <el-button>选择文件</el-button>
-          </el-upload>
-        </el-form-item>
-        <el-button
-          type="primary"
-          style="margin-top: 12px"
-          :loading="volunteerImportRequest.loading"
-          @click="handleVolunteerImport"
-        >
-          导入志愿服务
-        </el-button>
-      </el-form>
-    </el-card>
-
-    <el-card class="card">
       <h3>竞赛获奖记录导入</h3>
       <el-form ref="contestImportRef" :model="contestImportForm" :rules="contestImportRules" label-position="top">
         <el-form-item label="竞赛获奖 Excel" prop="fileName">
@@ -232,7 +180,6 @@ const handleContestFileChange = (file: UploadFile) => {
     v-if="
       importRequest.error ||
       competitionImportRequest.error ||
-      volunteerImportRequest.error ||
       contestImportRequest.error
     "
     class="card"
@@ -242,7 +189,6 @@ const handleContestFileChange = (file: UploadFile) => {
     :title="
       importRequest.error ||
       competitionImportRequest.error ||
-      volunteerImportRequest.error ||
       contestImportRequest.error
     "
     :closable="false"

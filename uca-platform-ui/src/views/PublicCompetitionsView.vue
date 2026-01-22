@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { listCompetitionsPublic } from '../api/catalog'
+import { listCompetitionsPublic, type CompetitionItem } from '../api/catalog'
 import { useRequest } from '../composables/useRequest'
 
-const competitions = ref<{ id: string; name: string }[]>([])
+const competitions = ref<CompetitionItem[]>([])
 const request = useRequest()
 
 const loadCompetitions = async () => {
@@ -28,6 +28,8 @@ onMounted(() => {
 
   <el-card class="card">
     <el-table v-if="competitions.length" :data="competitions">
+      <el-table-column prop="year" label="年份" width="120" />
+      <el-table-column prop="category" label="类型" width="100" />
       <el-table-column prop="name" label="竞赛名称" />
     </el-table>
     <el-empty v-else :description="request.loading ? '加载中' : '暂无竞赛数据'" />

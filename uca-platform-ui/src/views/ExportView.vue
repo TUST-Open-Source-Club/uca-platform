@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { exportRecordPdf, exportStudent, exportSummary } from '../api/exports'
+import { exportLaborHoursPdf, exportRecordPdf, exportStudent, exportSummary } from '../api/exports'
 import { useRequest } from '../composables/useRequest'
 
 const summaryForm = reactive({
@@ -12,15 +12,21 @@ const studentForm = reactive({
   studentNo: '',
 })
 const recordForm = reactive({
-  recordType: 'volunteer',
+  recordType: 'contest',
   recordId: '',
+})
+
+const laborForm = reactive({
+  studentNo: '',
 })
 
 const studentFormRef = ref()
 const recordFormRef = ref()
+const laborFormRef = ref()
 const summaryRequest = useRequest()
 const studentRequest = useRequest()
 const recordRequest = useRequest()
+const laborRequest = useRequest()
 
 const studentRules = {
   studentNo: [{ required: true, message: '请输入学号', trigger: 'blur' }],
@@ -28,6 +34,10 @@ const studentRules = {
 
 const recordRules = {
   recordId: [{ required: true, message: '请输入记录 ID', trigger: 'blur' }],
+}
+
+const laborRules = {
+  studentNo: [{ required: true, message: '请输入学号', trigger: 'blur' }],
 }
 
 const handleSummaryExport = async () => {
@@ -60,6 +70,16 @@ const handleRecordExport = async () => {
     await recordRequest.run(async () => {
       await exportRecordPdf(recordForm.recordType, recordForm.recordId)
     }, { successMessage: '记录 PDF 已导出' })
+  })
+}
+
+const handleLaborExport = async () => {
+  if (!laborFormRef.value) return
+  await laborFormRef.value.validate(async (valid: boolean) => {
+    if (!valid) return
+    await laborRequest.run(async () => {
+      await exportLaborHoursPdf(laborForm.studentNo)
+    }, { successMessage: '劳动教育学时认定表已导出' })
   })
 }
 </script>
@@ -106,7 +126,6 @@ const handleRecordExport = async () => {
       <el-form ref="recordFormRef" :model="recordForm" :rules="recordRules" label-position="top">
         <el-form-item label="记录类型">
           <el-select v-model="recordForm.recordType">
-            <el-option label="志愿服务" value="volunteer" />
             <el-option label="竞赛获奖" value="contest" />
           </el-select>
         </el-form-item>
@@ -118,15 +137,27 @@ const handleRecordExport = async () => {
         </el-button>
       </el-form>
     </el-card>
+
+    <el-card class="card">
+      <h3>劳动教育学时认定表</h3>
+      <el-form ref="laborFormRef" :model="laborForm" :rules="laborRules" label-position="top">
+        <el-form-item label="学号" prop="studentNo">
+          <el-input v-model="laborForm.studentNo" placeholder="2023001" />
+        </el-form-item>
+        <el-button type="primary" :loading="laborRequest.loading" @click="handleLaborExport">
+          导出 PDF
+        </el-button>
+      </el-form>
+    </el-card>
   </div>
 
   <el-alert
-    v-if="summaryRequest.error || studentRequest.error || recordRequest.error"
+    v-if="summaryRequest.error || studentRequest.error || recordRequest.error || laborRequest.error"
     class="card"
     style="margin-top: 24px"
     type="error"
     show-icon
-    :title="summaryRequest.error || studentRequest.error || recordRequest.error"
+    :title="summaryRequest.error || studentRequest.error || recordRequest.error || laborRequest.error"
     :closable="false"
   />
 </template>

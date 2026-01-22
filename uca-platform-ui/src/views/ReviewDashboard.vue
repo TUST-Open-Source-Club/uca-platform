@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { UploadFile } from 'element-plus'
-import { reviewContest, reviewVolunteer } from '../api/records'
+import { reviewContest } from '../api/records'
 import { uploadSignature } from '../api/attachments'
 import { useRequest } from '../composables/useRequest'
 
 const formRef = ref()
 const form = ref({
-  recordType: 'volunteer',
   recordId: '',
   stage: 'first',
   hours: 0,
@@ -57,10 +56,7 @@ const handleReview = async () => {
           status: form.value.status,
           rejection_reason: form.value.rejectionReason || null,
         }
-        const data =
-          form.value.recordType === 'volunteer'
-            ? await reviewVolunteer(form.value.recordId, payload)
-            : await reviewContest(form.value.recordId, payload)
+        const data = await reviewContest(form.value.recordId, payload)
         result.value = JSON.stringify(data, null, 2)
       },
       { successMessage: '审核已提交' },
@@ -81,7 +77,7 @@ const handleSignatureUpload = async () => {
   await signatureRequest.run(
     async () => {
       const data = await uploadSignature(
-        form.value.recordType,
+        'contest',
         form.value.recordId,
         form.value.stage,
         signatureFile.value as File,
@@ -105,12 +101,6 @@ const handleFileChange = (file: UploadFile) => {
 
   <el-card class="card">
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-      <el-form-item label="记录类型">
-        <el-select v-model="form.recordType">
-          <el-option label="志愿服务" value="volunteer" />
-          <el-option label="竞赛获奖" value="contest" />
-        </el-select>
-      </el-form-item>
       <el-form-item label="记录 ID" prop="recordId">
         <el-input v-model="form.recordId" placeholder="记录 UUID" />
       </el-form-item>

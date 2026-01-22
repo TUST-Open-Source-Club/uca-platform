@@ -1,4 +1,4 @@
-# UCA Platform 接口文档（University Comprehensive Assessment Platform）
+# Labor Hours Platform 接口文档
 
 本文档描述服务端已实现的接口与使用方式。
 
@@ -540,47 +540,19 @@
 
 ## 记录接口
 
-### POST /records/volunteer
-提交志愿服务记录（学生）。
-
-请求：
-```json
-{
-  "title": "社区服务",
-  "description": "社区清洁",
-  "self_hours": 4,
-  "custom_fields": {
-    "location": "校内操场"
-  }
-}
-```
-
-响应：
-```json
-{
-  "id": "<uuid>",
-  "student_id": "<uuid>",
-  "title": "社区服务",
-  "description": "社区清洁",
-  "self_hours": 4,
-  "first_review_hours": null,
-  "final_review_hours": null,
-  "status": "submitted",
-  "rejection_reason": null,
-  "custom_fields": [
-    { "field_key": "location", "label": "地点", "value": "校内操场" }
-  ]
-}
-```
-
 ### POST /records/contest
 提交竞赛获奖记录（学生）。
 
 请求：
 ```json
 {
+  "contest_year": 2024,
+  "contest_category": "A",
   "contest_name": "全国大学生数学建模竞赛",
+  "contest_level": "国家级",
+  "contest_role": "负责人",
   "award_level": "省赛一等奖",
+  "award_date": "2024-10-20",
   "self_hours": 8,
   "custom_fields": {
     "sponsor": "数学学院"
@@ -593,26 +565,24 @@
 {
   "id": "<uuid>",
   "student_id": "<uuid>",
+  "contest_year": 2024,
+  "contest_category": "A",
   "contest_name": "全国大学生数学建模竞赛",
+  "contest_level": "国家级",
+  "contest_role": "负责人",
   "award_level": "省赛一等奖",
+  "award_date": "2024-10-20T00:00:00+00:00",
   "self_hours": 8,
   "first_review_hours": null,
   "final_review_hours": null,
   "status": "submitted",
   "rejection_reason": null,
   "match_status": "matched",
+  "recommended_hours": 6,
   "custom_fields": [
     { "field_key": "sponsor", "label": "主办方", "value": "数学学院" }
   ]
 }
-```
-
-### POST /records/volunteer/query
-查询志愿服务记录（学生/审核角色）。
-
-请求：
-```json
-{ "status": "submitted" }
 ```
 
 ### POST /records/contest/query
@@ -621,19 +591,6 @@
 请求：
 ```json
 { "status": "submitted" }
-```
-
-### POST /records/volunteer/{record_id}/review
-审核志愿服务记录（初审：审核人员/管理员；复审：教师/管理员）。
-
-请求：
-```json
-{
-  "stage": "first",
-  "hours": 3,
-  "status": "approved",
-  "rejection_reason": null
-}
 ```
 
 ### POST /records/contest/{record_id}/review
@@ -650,14 +607,6 @@
 ```
 
 ## 附件与签名
-
-### POST /attachments/volunteer/{record_id}
-上传志愿服务附件（学生本人，multipart `file`）。
-
-响应：
-```json
-{ "id": "<uuid>", "stored_name": "..." }
-```
 
 ### POST /attachments/contest/{record_id}
 上传竞赛附件（学生本人，multipart `file`）。
@@ -700,6 +649,10 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 ### POST /export/record/{record_type}/{record_id}/pdf
 导出单条记录 PDF。
+说明：`record_type` 仅支持 `contest`。
+
+### POST /export/labor-hours/{student_no}/pdf
+导出劳动教育学时认定表（每学生一份 PDF）。该 PDF 的字段与布局由导出模板配置决定。
 
 ## 管理接口
 
@@ -711,7 +664,7 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 [
   {
     "id": "<uuid>",
-    "form_type": "volunteer",
+    "form_type": "contest",
     "field_key": "location",
     "label": "地点",
     "field_type": "text",
@@ -727,7 +680,7 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 响应：
 ```json
 [
-  { "id": "<uuid>", "name": "全国大学生数学建模竞赛" }
+  { "id": "<uuid>", "year": 2024, "category": "A", "name": "全国大学生数学建模竞赛" }
 ]
 ```
 
@@ -857,12 +810,12 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 标准表头（竞赛库导入）：
 ```
-竞赛名称
+年份 | 竞赛类型 | 竞赛名称
 ```
 示例：
 ```
-竞赛名称
-全国大学生数学建模竞赛
+年份,竞赛类型,竞赛名称
+2024,A,全国大学生数学建模竞赛
 ```
 
 ### GET /admin/form-fields
@@ -874,7 +827,7 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 请求：
 ```json
 {
-  "form_type": "volunteer",
+  "form_type": "contest",
   "field_key": "location",
   "label": "地点",
   "field_type": "text",
@@ -885,14 +838,71 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 
 表单类型（form_type）建议值：
 ```
-volunteer | contest | summary | student_export
+contest | summary | student_export
 ```
+
+### GET /admin/import-templates
+获取导入模板配置（管理员）。
+
+响应示例：
+```json
+[
+  {
+    "template_key": "competition_library",
+    "name": "认可竞赛列表",
+    "fields": [
+      { "field_key": "contest_year", "label": "年份", "column_title": "年份", "required": true, "order_index": 1 }
+    ]
+  }
+]
+```
+
+### POST /admin/import-templates/{template_key}
+更新导入模板（管理员）。
+
+请求：
+```json
+{
+  "name": "学生获奖情况清单",
+  "fields": [
+    { "field_key": "student_no", "label": "学号", "column_title": "学号", "required": true, "order_index": 1 }
+  ]
+}
+```
+
+### GET /admin/export-templates/{template_key}
+获取导出模板（管理员）。
+
+### POST /admin/export-templates/{template_key}
+更新导出模板（管理员）。
+
+请求：
+```json
+{
+  "name": "劳动教育学时认定表",
+  "layout": {
+    "title": "劳动教育学时认定表",
+    "sections": [
+      { "type": "info", "title": "学生信息", "fields": [{ "key": "student_no", "label": "学号" }] },
+      { "type": "table", "title": "竞赛获奖明细", "columns": [{ "key": "contest_name", "label": "竞赛名称" }] }
+    ],
+    "signature": { "first_label": "初审教师签名", "final_label": "复审教师签名" }
+  }
+}
+```
+
+说明：
+- 信息区块支持学生字段与汇总字段（如 `self_hours`、`approved_hours`、`reason`）。
+- 表格区块支持竞赛记录字段；自定义字段使用 `custom.{字段Key}` 形式。
+
+### GET /admin/labor-hour-rules
+获取劳动学时规则（管理员）。
+
+### POST /admin/labor-hour-rules
+更新劳动学时规则（管理员）。
 
 ### GET /admin/deleted/students
 获取已删除学生列表（管理员）。
-
-### GET /admin/deleted/records/volunteer
-获取已删除志愿记录（管理员）。
 
 ### GET /admin/deleted/records/contest
 获取已删除竞赛记录（管理员）。
@@ -909,24 +919,6 @@ volunteer | contest | summary | student_export
 
 ### DELETE /admin/purge/students/{student_no}
 彻底删除学生（管理员，仅允许删除已软删除的学生）。
-
-响应：
-```json
-{ "deleted": true }
-```
-
-### DELETE /admin/records/volunteer/{record_id}
-软删除未审核的志愿服务记录（管理员）。
-
-响应：
-```json
-{ "deleted": true }
-```
-
-说明：仅允许删除 `status=submitted` 的记录。
-
-### DELETE /admin/purge/records/volunteer/{record_id}
-彻底删除志愿服务记录（管理员，仅允许删除已软删除的记录）。
 
 响应：
 ```json
@@ -951,32 +943,6 @@ volunteer | contest | summary | student_export
 { "deleted": true }
 ```
 
-### POST /admin/records/volunteer/import
-批量导入志愿服务记录（管理员，multipart 字段 `file`）。
-
-响应：
-```json
-{ "inserted": 12, "skipped": 3 }
-```
-
-标准表头（志愿服务导入，必填）：
-```
-学号 | 标题 | 描述 | 自评学时
-```
-可选表头：
-```
-初审学时 | 复审学时 | 审核状态 | 不通过原因
-```
-自定义字段列：
-```
-列名可为字段 label 或 field_key（如 “地点” 或 “location”）
-```
-示例：
-```
-学号,标题,描述,自评学时,初审学时,审核状态,地点
-2023001,社区服务,社区清洁,4,3,已初审,校内操场
-```
-
 ### POST /admin/records/contest/import
 批量导入竞赛获奖记录（管理员，multipart 字段 `file`）。
 
@@ -985,13 +951,13 @@ volunteer | contest | summary | student_export
 { "inserted": 10, "skipped": 1 }
 ```
 
-标准表头（竞赛获奖导入，必填）：
+标准表头（竞赛获奖导入，默认必填，可在导入模板中调整）：
 ```
-学号 | 竞赛名称 | 获奖等级 | 自评学时
+学号 | 竞赛名称 | 竞赛级别 | 角色 | 获奖等级 | 自评学时
 ```
-可选表头：
+常用可选表头：
 ```
-初审学时 | 复审学时 | 审核状态 | 不通过原因
+竞赛年份 | 竞赛类型 | 获奖时间 | 初审学时 | 复审学时 | 审核状态 | 不通过原因
 ```
 自定义字段列：
 ```
@@ -999,6 +965,6 @@ volunteer | contest | summary | student_export
 ```
 示例：
 ```
-学号,竞赛名称,获奖等级,自评学时,复审学时,审核状态,主办方
-2023001,全国大学生数学建模竞赛,省赛一等奖,8,6,已复审,数学学院
+学号,竞赛名称,竞赛级别,角色,获奖等级,自评学时,竞赛年份,竞赛类型,获奖时间,复审学时,审核状态,主办方
+2023001,全国大学生数学建模竞赛,国家级,负责人,省赛一等奖,8,2024,A,2024-10-20,6,已复审,数学学院
 ```

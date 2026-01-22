@@ -11,3 +11,7 @@ export async function exportStudent(studentNo: string): Promise<void> {
 export async function exportRecordPdf(recordType: string, recordId: string): Promise<void> {
   return downloadFile(`/export/record/${recordType}/${recordId}/pdf`)
 }
+
+export async function exportLaborHoursPdf(studentNo: string): Promise<void> {
+  return downloadFile(`/export/labor-hours/${encodeURIComponent(studentNo)}/pdf`)
+}

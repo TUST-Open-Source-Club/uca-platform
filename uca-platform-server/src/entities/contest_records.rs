@@ -9,8 +9,13 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
     pub student_id: Uuid,
+    pub contest_year: Option<i32>,
+    pub contest_category: Option<String>,
     pub contest_name: String,
+    pub contest_level: Option<String>,
+    pub contest_role: Option<String>,
     pub award_level: String,
+    pub award_date: Option<DateTimeUtc>,
     pub self_hours: i32,
     pub first_review_hours: Option<i32>,
     pub final_review_hours: Option<i32>,

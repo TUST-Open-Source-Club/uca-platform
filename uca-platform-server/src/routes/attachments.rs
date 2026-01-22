@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{
     access::require_session_user,
     entities::{
-        attachments, review_signatures, students, ContestRecord, Student, VolunteerRecord,
+        attachments, review_signatures, students, ContestRecord, Student,
     },
     error::AppError,
     state::AppState,
@@ -38,16 +38,6 @@ pub struct SignatureResponse {
     pub signature_path: String,
 }
 
-/// 上传志愿服务附件（学生本人）。
-pub async fn upload_volunteer_attachment(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(record_id): Path<Uuid>,
-    multipart: Multipart,
-) -> Result<Json<AttachmentResponse>, AppError> {
-    upload_record_attachment(&state, &jar, "volunteer", record_id, multipart).await
-}
-
 /// 上传竞赛附件（学生本人）。
 pub async fn upload_contest_attachment(
     State(state): State<AppState>,
@@ -69,28 +59,6 @@ pub async fn upload_review_signature(
     ensure_review_permission(&user.role, &stage)?;
 
     let student = match record_type.as_str() {
-        "volunteer" => {
-            let record = VolunteerRecord::find_by_id(record_id)
-                .one(&state.db)
-                .await
-                .map_err(|err| AppError::Database(err.to_string()))?
-                .ok_or_else(|| AppError::not_found("record not found"))?;
-            if record.is_deleted {
-                return Err(AppError::not_found("record not found"));
-            }
-            Student::find_by_id(record.student_id)
-                .one(&state.db)
-                .await
-                .map_err(|err| AppError::Database(err.to_string()))?
-                .ok_or_else(|| AppError::not_found("student not found"))
-                .and_then(|student| {
-                    if student.is_deleted {
-                        Err(AppError::not_found("student not found"))
-                    } else {
-                        Ok(student)
-                    }
-                })?
-        }
         "contest" => {
             let record = ContestRecord::find_by_id(record_id)
                 .one(&state.db)
@@ -208,19 +176,6 @@ async fn ensure_record_ownership(
     student_id: Uuid,
 ) -> Result<(), AppError> {
     match record_type {
-        "volunteer" => {
-            let record = VolunteerRecord::find_by_id(record_id)
-                .one(&state.db)
-                .await
-                .map_err(|err| AppError::Database(err.to_string()))?
-                .ok_or_else(|| AppError::not_found("record not found"))?;
-            if record.is_deleted {
-                return Err(AppError::not_found("record not found"));
-            }
-            if record.student_id != student_id {
-                return Err(AppError::auth("forbidden"));
-            }
-        }
         "contest" => {
             let record = ContestRecord::find_by_id(record_id)
                 .one(&state.db)
@@ -352,24 +307,24 @@ mod tests {
 
     #[test]
     fn build_stored_name_sanitizes_and_preserves_extension() {
-        let name = build_stored_name("2023/01", "张/三", "volunteer:", "proof.pdf");
+        let name = build_stored_name("2023/01", "张/三", "contest:", "proof.pdf");
         assert!(name.contains("2023_01"));
         assert!(name.contains("张_三"));
-        assert!(name.contains("volunteer_"));
+        assert!(name.contains("contest_"));
         assert!(name.ends_with(".pdf"));
     }
 
     #[test]
     fn build_stored_name_falls_back_to_bin() {
-        let name = build_stored_name("2023", "张三", "volunteer", "proof");
+        let name = build_stored_name("2023", "张三", "contest", "proof");
         assert!(name.ends_with(".bin"));
     }
 
     #[test]
     fn build_upload_dir_appends_stage() {
         let base = PathBuf::from("data/uploads");
-        let dir = build_upload_dir(&base, "signatures", "volunteer", Some("first"));
-        assert!(dir.ends_with("data/uploads/signatures/volunteer/first"));
+        let dir = build_upload_dir(&base, "signatures", "contest", Some("first"));
+        assert!(dir.ends_with("data/uploads/signatures/contest/first"));
     }
 
     #[test]

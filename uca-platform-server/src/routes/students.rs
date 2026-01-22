@@ -15,10 +15,9 @@ use crate::{
     auth::hash_password,
     entities::{students, users, Student, User},
     error::AppError,
+    templates::{build_header_index, load_import_template, map_import_fields, read_cell_by_index},
     state::AppState,
 };
-
-const REQUIRED_HEADERS: [&str; 7] = ["学号", "姓名", "性别", "院系", "专业", "班级", "手机号"];
 
 /// 学生列表响应。
 #[derive(Debug, Serialize)]
@@ -245,21 +244,9 @@ pub async fn import_students(
         .worksheet_range(&sheet_name)
         .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
-    let mut header_index = std::collections::HashMap::new();
-    if let Some(header_row) = range.rows().next() {
-        for (idx, cell) in header_row.iter().enumerate() {
-            let trimmed = cell.to_string().trim().to_string();
-            if !trimmed.is_empty() {
-                header_index.insert(trimmed, idx);
-            }
-        }
-    }
-
-    for required in REQUIRED_HEADERS {
-        if !header_index.contains_key(required) {
-            return Err(AppError::bad_request("missing required header"));
-        }
-    }
+    let template = load_import_template(&state, "students").await?;
+    let header_index = build_header_index(range.rows().next());
+    let base_index = map_import_fields(&header_index, &template.fields)?;
 
     let transaction = state
         .db
@@ -271,13 +258,13 @@ pub async fn import_students(
     let mut updated = 0usize;
 
     for row in range.rows().skip(1) {
-        let student_no = read_cell(&header_index, "学号", row);
-        let name = read_cell(&header_index, "姓名", row);
-        let gender = read_cell(&header_index, "性别", row);
-        let department = read_cell(&header_index, "院系", row);
-        let major = read_cell(&header_index, "专业", row);
-        let class_name = read_cell(&header_index, "班级", row);
-        let phone = read_cell(&header_index, "手机号", row);
+        let student_no = read_cell_by_index_opt(base_index.get("student_no"), row);
+        let name = read_cell_by_index_opt(base_index.get("name"), row);
+        let gender = read_cell_by_index_opt(base_index.get("gender"), row);
+        let department = read_cell_by_index_opt(base_index.get("department"), row);
+        let major = read_cell_by_index_opt(base_index.get("major"), row);
+        let class_name = read_cell_by_index_opt(base_index.get("class_name"), row);
+        let phone = read_cell_by_index_opt(base_index.get("phone"), row);
 
         if student_no.is_empty() || name.is_empty() {
             continue;
@@ -338,6 +325,14 @@ pub async fn import_students(
         "inserted": inserted,
         "updated": updated
     })))
+}
+
+fn read_cell_by_index_opt(index: Option<&usize>, row: &[calamine::Data]) -> String {
+    let idx = match index {
+        Some(value) => *value,
+        None => return String::new(),
+    };
+    read_cell_by_index(idx, row)
 }
 
 async fn upsert_student_user<C>(

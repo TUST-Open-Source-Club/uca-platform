@@ -3,28 +3,23 @@ import { onMounted, ref } from 'vue'
 import {
   listDeletedContestRecords,
   listDeletedStudents,
-  listDeletedVolunteerRecords,
   purgeContestRecord,
   purgeStudent,
-  purgeVolunteerRecord,
 } from '../api/admin'
 import { useRequest } from '../composables/useRequest'
 
 const deletedStudents = ref<any[]>([])
-const deletedVolunteerRecords = ref<any[]>([])
 const deletedContestRecords = ref<any[]>([])
 const listRequest = useRequest()
 const purgeRequest = useRequest()
 
 const loadDeleted = async () => {
   await listRequest.run(async () => {
-    const [students, volunteer, contest] = await Promise.all([
+    const [students, contest] = await Promise.all([
       listDeletedStudents(),
-      listDeletedVolunteerRecords(),
       listDeletedContestRecords(),
     ])
     deletedStudents.value = students
-    deletedVolunteerRecords.value = volunteer
     deletedContestRecords.value = contest
   })
 }
@@ -34,13 +29,6 @@ const handlePurgeStudent = async (studentNo: string) => {
     await purgeStudent(studentNo)
     await loadDeleted()
   }, { successMessage: '学生已彻底删除' })
-}
-
-const handlePurgeVolunteerRecord = async (recordId: string) => {
-  await purgeRequest.run(async () => {
-    await purgeVolunteerRecord(recordId)
-    await loadDeleted()
-  }, { successMessage: '志愿记录已彻底删除' })
 }
 
 const handlePurgeContestRecord = async (recordId: string) => {
@@ -75,24 +63,6 @@ onMounted(() => {
             size="small"
             :loading="purgeRequest.loading"
             @click="handlePurgeStudent(scope.row.student_no)"
-          >
-            彻底删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <h3 style="margin-top: 16px">已删除志愿记录</h3>
-    <el-table :data="deletedVolunteerRecords">
-      <el-table-column prop="title" label="标题" />
-      <el-table-column prop="status" label="状态" />
-      <el-table-column label="操作">
-        <template #default="scope">
-          <el-button
-            type="danger"
-            size="small"
-            :loading="purgeRequest.loading"
-            @click="handlePurgeVolunteerRecord(scope.row.id)"
           >
             彻底删除
           </el-button>

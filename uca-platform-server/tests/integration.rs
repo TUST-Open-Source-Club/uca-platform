@@ -52,7 +52,7 @@ async fn setup_context() -> TestContext {
     };
 
     let mut builder = WebauthnBuilder::new(&config.rp_id, &config.rp_origin).unwrap();
-    builder = builder.rp_name("UCA Platform");
+    builder = builder.rp_name("Labor Hours Platform");
     let webauthn = builder.build().unwrap();
 
     let state = AppState::new(Arc::new(config), db, webauthn).unwrap();
@@ -342,7 +342,7 @@ async fn admin_competitions_and_forms() {
     let cookie = create_session_cookie(&ctx.state, admin.id).await;
 
     let form_field = json!({
-        "form_type": "volunteer",
+        "form_type": "contest",
         "field_key": "location",
         "label": "地点",
         "field_type": "text",
@@ -365,7 +365,7 @@ async fn admin_competitions_and_forms() {
 
     let request = Request::builder()
         .method("GET")
-        .uri("/forms/volunteer/fields")
+        .uri("/forms/contest/fields")
         .header(header::COOKIE, cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -380,7 +380,10 @@ async fn import_students_and_records() {
     let admin = create_user(&ctx.state, "admin2", "admin").await;
     let cookie = create_session_cookie(&ctx.state, admin.id).await;
 
-    let competitions_xlsx = build_xlsx(&["竞赛名称"], &[vec!["全国大学生数学建模竞赛"]]);
+    let competitions_xlsx = build_xlsx(
+        &["年份", "竞赛类型", "竞赛名称"],
+        &[vec!["2024", "A", "全国大学生数学建模竞赛"]],
+    );
     let request = multipart_request("/admin/competitions/import", "competitions.xlsx", competitions_xlsx)
         .with_cookie(&cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
@@ -395,18 +398,9 @@ async fn import_students_and_records() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let volunteer_xlsx = build_xlsx(
-        &["学号", "标题", "描述", "自评学时"],
-        &[vec!["2023001", "社区服务", "清洁", "4"]],
-    );
-    let request = multipart_request("/admin/records/volunteer/import", "volunteer.xlsx", volunteer_xlsx)
-        .with_cookie(&cookie);
-    let response = ctx.app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
     let contest_xlsx = build_xlsx(
-        &["学号", "竞赛名称", "获奖等级", "自评学时"],
-        &[vec!["2023001", "全国大学生数学建模竞赛", "省赛一等奖", "8"]],
+        &["学号", "竞赛名称", "竞赛级别", "角色", "获奖等级", "自评学时"],
+        &[vec!["2023001", "全国大学生数学建模竞赛", "国家级", "负责人", "省赛一等奖", "8"]],
     );
     let request = multipart_request("/admin/records/contest/import", "contest.xlsx", contest_xlsx)
         .with_cookie(&cookie);
@@ -427,7 +421,7 @@ async fn create_and_review_records() {
     let field_id = Uuid::new_v4();
     let field_model = ucaplatform::entities::form_fields::ActiveModel {
         id: Set(field_id),
-        form_type: Set("volunteer".to_string()),
+        form_type: Set("contest".to_string()),
         field_key: Set("location".to_string()),
         label: Set("地点".to_string()),
         field_type: Set("text".to_string()),
@@ -443,8 +437,15 @@ async fn create_and_review_records() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 3, "custom_fields": {} }),
+        "/records/contest",
+        json!({
+            "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
+            "award_level": "省赛一等奖",
+            "self_hours": 8,
+            "custom_fields": {}
+        }),
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
@@ -452,21 +453,14 @@ async fn create_and_review_records() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 3, "custom_fields": { "location": "校内操场" } }),
-    )
-    .with_cookie(&student_cookie);
-    let response = ctx.app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let request = json_request(
-        "POST",
         "/records/contest",
         json!({
             "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
             "award_level": "省赛一等奖",
             "self_hours": 8,
-            "custom_fields": {}
+            "custom_fields": { "location": "校内操场" }
         }),
     )
     .with_cookie(&student_cookie);
@@ -476,14 +470,14 @@ async fn create_and_review_records() {
     let reviewer = create_user(&ctx.state, "reviewer1", "reviewer").await;
     let reviewer_cookie = create_session_cookie(&ctx.state, reviewer.id).await;
 
-    let volunteer_record = ucaplatform::entities::VolunteerRecord::find()
+    let contest_record = ucaplatform::entities::ContestRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
         .unwrap();
     let request = json_request(
         "POST",
-        &format!("/records/volunteer/{}/review", volunteer_record.id),
+        &format!("/records/contest/{}/review", contest_record.id),
         json!({ "stage": "first", "hours": 2, "status": "approved", "rejection_reason": null }),
     )
     .with_cookie(&reviewer_cookie);
@@ -504,8 +498,15 @@ async fn export_endpoints() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+        "/records/contest",
+        json!({
+            "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
+            "award_level": "省赛一等奖",
+            "self_hours": 2,
+            "custom_fields": {}
+        }),
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
@@ -529,14 +530,23 @@ async fn export_endpoints() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = ucaplatform::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::ContestRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
         .unwrap();
     let request = Request::builder()
         .method("POST")
-        .uri(format!("/export/record/volunteer/{}/pdf", record.id))
+        .uri(format!("/export/record/contest/{}/pdf", record.id))
+        .header(header::COOKIE, cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/export/labor-hours/2023003/pdf")
         .header(header::COOKIE, cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -555,21 +565,28 @@ async fn upload_attachments_and_signatures() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+        "/records/contest",
+        json!({
+            "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
+            "award_level": "省赛一等奖",
+            "self_hours": 2,
+            "custom_fields": {}
+        }),
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = ucaplatform::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::ContestRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
         .unwrap();
 
     let attachment = multipart_request(
-        &format!("/attachments/volunteer/{}", record.id),
+        &format!("/attachments/contest/{}", record.id),
         "proof.txt",
         b"test".to_vec(),
     )
@@ -580,7 +597,7 @@ async fn upload_attachments_and_signatures() {
     let reviewer = create_user(&ctx.state, "reviewer2", "reviewer").await;
     let reviewer_cookie = create_session_cookie(&ctx.state, reviewer.id).await;
     let signature = multipart_request(
-        &format!("/signatures/volunteer/{}/first", record.id),
+        &format!("/signatures/contest/{}/first", record.id),
         "sig.png",
         b"sig".to_vec(),
     )
@@ -603,14 +620,21 @@ async fn delete_student_and_records() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+        "/records/contest",
+        json!({
+            "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
+            "award_level": "省赛一等奖",
+            "self_hours": 2,
+            "custom_fields": {}
+        }),
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = ucaplatform::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::ContestRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -618,14 +642,14 @@ async fn delete_student_and_records() {
 
     let request = Request::builder()
         .method("DELETE")
-        .uri(format!("/admin/records/volunteer/{}", record.id))
+        .uri(format!("/admin/records/contest/{}", record.id))
         .header(header::COOKIE, admin_cookie.clone())
         .body(Body::empty())
         .unwrap();
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let request = json_request("POST", "/records/volunteer/query", json!({}))
+    let request = json_request("POST", "/records/contest/query", json!({}))
         .with_cookie(&admin_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -663,14 +687,21 @@ async fn purge_deleted_student_and_record() {
 
     let request = json_request(
         "POST",
-        "/records/volunteer",
-        json!({ "title": "志愿活动", "description": "服务", "self_hours": 2, "custom_fields": {} }),
+        "/records/contest",
+        json!({
+            "contest_name": "全国大学生数学建模竞赛",
+            "contest_level": "国家级",
+            "contest_role": "负责人",
+            "award_level": "省赛一等奖",
+            "self_hours": 2,
+            "custom_fields": {}
+        }),
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let record = ucaplatform::entities::VolunteerRecord::find()
+    let record = ucaplatform::entities::ContestRecord::find()
         .one(&ctx.state.db)
         .await
         .unwrap()
@@ -678,7 +709,7 @@ async fn purge_deleted_student_and_record() {
 
     let request = Request::builder()
         .method("DELETE")
-        .uri(format!("/admin/records/volunteer/{}", record.id))
+        .uri(format!("/admin/records/contest/{}", record.id))
         .header(header::COOKIE, admin_cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -687,7 +718,7 @@ async fn purge_deleted_student_and_record() {
 
     let request = Request::builder()
         .method("DELETE")
-        .uri(format!("/admin/purge/records/volunteer/{}", record.id))
+        .uri(format!("/admin/purge/records/contest/{}", record.id))
         .header(header::COOKIE, admin_cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -696,7 +727,7 @@ async fn purge_deleted_student_and_record() {
 
     let request = Request::builder()
         .method("GET")
-        .uri("/admin/deleted/records/volunteer")
+        .uri("/admin/deleted/records/contest")
         .header(header::COOKIE, admin_cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -741,7 +772,7 @@ async fn auth_totp_and_recovery() {
     reset_database(&ctx.state).await;
     let user = create_user(&ctx.state, "2023999", "student").await;
 
-    let (secret, _) = generate_totp("UCA Platform", &user.username).unwrap();
+    let (secret, _) = generate_totp("Labor Hours Platform", &user.username).unwrap();
     let encrypted = encrypt_secret(&secret, &ctx.state.config.auth_secret_key).unwrap();
     let totp_id = Uuid::new_v4();
     let totp_model = totp_secrets::ActiveModel {
@@ -764,7 +795,7 @@ async fn auth_totp_and_recovery() {
         30,
         secret.clone(),
         Some(user.username.clone()),
-        "UCA Platform".to_string(),
+        "Labor Hours Platform".to_string(),
     )
     .generate_current()
     .unwrap();

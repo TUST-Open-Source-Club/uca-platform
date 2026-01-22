@@ -1,4 +1,4 @@
-//! 志愿服务与竞赛记录接口。
+//! 竞赛记录接口。
 
 use axum::{extract::State, Json, extract::Path};
 use axum_extra::extract::cookie::CookieJar;
@@ -16,10 +16,10 @@ use crate::{
     access::{require_role, require_session_user},
     entities::{
         competition_library, contest_records, form_field_values, form_fields, students,
-        volunteer_records, CompetitionLibrary, ContestRecord, FormField, FormFieldValue, Student,
-        VolunteerRecord,
+        CompetitionLibrary, ContestRecord, FormField, FormFieldValue, Student,
     },
     error::AppError,
+    labor_hours::{compute_recommended_hours, load_labor_hour_rules},
     state::AppState,
 };
 
@@ -31,59 +31,29 @@ const STATUS_REJECTED: &str = "rejected";
 const REVIEW_STAGE_FIRST: &str = "first";
 const REVIEW_STAGE_FINAL: &str = "final";
 
-/// 志愿服务提交请求。
-#[derive(Debug, Deserialize, Validate)]
-pub struct CreateVolunteerRequest {
-    /// 标题。
-    #[validate(length(min = 1, max = 120))]
-    pub title: String,
-    /// 描述。
-    #[validate(length(min = 1, max = 2000))]
-    pub description: String,
-    /// 自评学时。
-    pub self_hours: i32,
-    /// 自定义字段。
-    pub custom_fields: Option<HashMap<String, String>>,
-}
-
 /// 竞赛获奖提交请求。
 #[derive(Debug, Deserialize, Validate)]
 pub struct CreateContestRequest {
     /// 竞赛名称。
     #[validate(length(min = 1, max = 200))]
     pub contest_name: String,
+    /// 竞赛级别（国家级/省级/校级）。
+    pub contest_level: Option<String>,
+    /// 竞赛角色（负责人/成员）。
+    pub contest_role: Option<String>,
+    /// 竞赛年份。
+    pub contest_year: Option<i32>,
+    /// 竞赛类型（A/B）。
+    pub contest_category: Option<String>,
     /// 获奖等级。
     #[validate(length(min = 1, max = 120))]
     pub award_level: String,
+    /// 获奖时间（ISO 8601 日期或时间）。
+    pub award_date: Option<String>,
     /// 自评学时。
     pub self_hours: i32,
     /// 自定义字段。
     pub custom_fields: Option<HashMap<String, String>>,
-}
-
-/// 志愿服务记录响应。
-#[derive(Debug, Serialize)]
-pub struct VolunteerRecordResponse {
-    /// 记录 ID。
-    pub id: Uuid,
-    /// 学生 ID。
-    pub student_id: Uuid,
-    /// 标题。
-    pub title: String,
-    /// 描述。
-    pub description: String,
-    /// 自评学时。
-    pub self_hours: i32,
-    /// 初审学时。
-    pub first_review_hours: Option<i32>,
-    /// 复审学时。
-    pub final_review_hours: Option<i32>,
-    /// 状态。
-    pub status: String,
-    /// 不通过原因。
-    pub rejection_reason: Option<String>,
-    /// 自定义字段。
-    pub custom_fields: Vec<CustomFieldValueResponse>,
 }
 
 /// 竞赛记录响应。
@@ -95,8 +65,18 @@ pub struct ContestRecordResponse {
     pub student_id: Uuid,
     /// 竞赛名称。
     pub contest_name: String,
+    /// 竞赛年份。
+    pub contest_year: Option<i32>,
+    /// 竞赛类型。
+    pub contest_category: Option<String>,
+    /// 竞赛级别。
+    pub contest_level: Option<String>,
+    /// 竞赛角色。
+    pub contest_role: Option<String>,
     /// 获奖等级。
     pub award_level: String,
+    /// 获奖时间。
+    pub award_date: Option<String>,
     /// 自评学时。
     pub self_hours: i32,
     /// 初审学时。
@@ -109,6 +89,8 @@ pub struct ContestRecordResponse {
     pub rejection_reason: Option<String>,
     /// 竞赛名称匹配标识。
     pub match_status: String,
+    /// 推荐学时。
+    pub recommended_hours: i32,
     /// 自定义字段。
     pub custom_fields: Vec<CustomFieldValueResponse>,
 }
@@ -122,13 +104,6 @@ pub struct CustomFieldValueResponse {
     pub label: String,
     /// 字段值。
     pub value: String,
-}
-
-/// 志愿服务查询条件。
-#[derive(Debug, Deserialize)]
-pub struct VolunteerQuery {
-    /// 状态筛选。
-    pub status: Option<String>,
 }
 
 /// 竞赛查询条件。
@@ -153,75 +128,6 @@ pub struct ReviewRequest {
     pub rejection_reason: Option<String>,
 }
 
-/// 提交志愿服务记录（学生）。
-pub async fn create_volunteer_record(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Json(payload): Json<CreateVolunteerRequest>,
-) -> Result<Json<VolunteerRecordResponse>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "student")?;
-    payload
-        .validate()
-        .map_err(|_| AppError::validation("invalid volunteer payload"))?;
-
-    let student = Student::find()
-        .filter(students::Column::StudentNo.eq(&user.username))
-        .filter(students::Column::IsDeleted.eq(false))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?
-        .ok_or_else(|| AppError::not_found("student not found"))?;
-
-    let custom_fields = payload.custom_fields.unwrap_or_default();
-    let form_fields = load_form_fields(&state, "volunteer").await?;
-    validate_custom_fields(&form_fields, &custom_fields)?;
-
-    let now = Utc::now();
-    let id = Uuid::new_v4();
-    let model = volunteer_records::ActiveModel {
-        id: Set(id),
-        student_id: Set(student.id),
-        title: Set(payload.title.clone()),
-        description: Set(payload.description.clone()),
-        self_hours: Set(payload.self_hours),
-        first_review_hours: Set(None),
-        final_review_hours: Set(None),
-        status: Set(STATUS_SUBMITTED.to_string()),
-        rejection_reason: Set(None),
-        is_deleted: Set(false),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    volunteer_records::Entity::insert(model)
-        .exec_without_returning(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let model_id = id;
-    insert_custom_fields(&state, "volunteer", model_id, &form_fields, &custom_fields).await?;
-
-    let custom_values = fetch_custom_fields(&state, "volunteer", &[model_id], &form_fields).await?;
-    let model = volunteer_records::Model {
-        id,
-        student_id: student.id,
-        title: payload.title,
-        description: payload.description,
-        self_hours: payload.self_hours,
-        first_review_hours: None,
-        final_review_hours: None,
-        status: STATUS_SUBMITTED.to_string(),
-        rejection_reason: None,
-        is_deleted: false,
-        created_at: now,
-        updated_at: now,
-    };
-    Ok(Json(model_to_volunteer_response(
-        model,
-        custom_values.get(&model_id).cloned().unwrap_or_default(),
-    )))
-}
-
 /// 提交竞赛获奖记录（学生）。
 pub async fn create_contest_record(
     State(state): State<AppState>,
@@ -233,6 +139,22 @@ pub async fn create_contest_record(
     payload
         .validate()
         .map_err(|_| AppError::validation("invalid contest payload"))?;
+    if payload
+        .contest_level
+        .as_deref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        return Err(AppError::validation("contest_level required"));
+    }
+    if payload
+        .contest_role
+        .as_deref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        return Err(AppError::validation("contest_role required"));
+    }
 
     let student = Student::find()
         .filter(students::Column::StudentNo.eq(&user.username))
@@ -248,11 +170,17 @@ pub async fn create_contest_record(
 
     let now = Utc::now();
     let id = Uuid::new_v4();
+    let award_date = parse_award_date(payload.award_date.as_deref())?;
     let model = contest_records::ActiveModel {
         id: Set(id),
         student_id: Set(student.id),
+        contest_year: Set(payload.contest_year),
+        contest_category: Set(payload.contest_category.as_ref().map(|value| value.to_uppercase())),
         contest_name: Set(payload.contest_name.clone()),
+        contest_level: Set(payload.contest_level.clone()),
+        contest_role: Set(payload.contest_role.clone()),
         award_level: Set(payload.award_level.clone()),
+        award_date: Set(award_date),
         self_hours: Set(payload.self_hours),
         first_review_hours: Set(None),
         final_review_hours: Set(None),
@@ -268,14 +196,26 @@ pub async fn create_contest_record(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     let match_status = contest_match_status(&state, &payload.contest_name).await?;
+    let rule_config = load_labor_hour_rules(&state).await?;
+    let recommended_hours = compute_recommended_hours(
+        rule_config,
+        payload.contest_category.as_deref(),
+        payload.contest_level.as_deref(),
+        payload.contest_role.as_deref(),
+    );
     let model_id = id;
     insert_custom_fields(&state, "contest", model_id, &form_fields, &custom_fields).await?;
     let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
     let model = contest_records::Model {
         id,
         student_id: student.id,
+        contest_year: payload.contest_year,
+        contest_category: payload.contest_category.map(|value| value.to_uppercase()),
         contest_name: payload.contest_name,
+        contest_level: payload.contest_level,
+        contest_role: payload.contest_role,
         award_level: payload.award_level,
+        award_date,
         self_hours: payload.self_hours,
         first_review_hours: None,
         final_review_hours: None,
@@ -288,58 +228,9 @@ pub async fn create_contest_record(
     Ok(Json(model_to_contest_response(
         model,
         &match_status,
+        recommended_hours,
         custom_values.get(&model_id).cloned().unwrap_or_default(),
     )))
-}
-
-/// 查询志愿服务记录（学生或审核角色）。
-pub async fn list_volunteer_records(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Json(query): Json<VolunteerQuery>,
-) -> Result<Json<Vec<VolunteerRecordResponse>>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-
-    let mut finder = VolunteerRecord::find().filter(volunteer_records::Column::IsDeleted.eq(false));
-    if user.role == "student" {
-        let student = Student::find()
-            .filter(students::Column::StudentNo.eq(&user.username))
-            .filter(students::Column::IsDeleted.eq(false))
-            .one(&state.db)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?
-            .ok_or_else(|| AppError::not_found("student not found"))?;
-        finder = finder.filter(volunteer_records::Column::StudentId.eq(student.id));
-    } else if user.role != "admin" && user.role != "teacher" && user.role != "reviewer" {
-        return Err(AppError::auth("forbidden"));
-    } else {
-        finder = finder
-            .join(JoinType::InnerJoin, volunteer_records::Relation::Student.def())
-            .filter(students::Column::IsDeleted.eq(false));
-    }
-
-    if let Some(status) = query.status {
-        finder = finder.filter(volunteer_records::Column::Status.eq(status));
-    }
-
-    let records = finder
-        .all(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let form_fields = load_form_fields(&state, "volunteer").await?;
-    let ids: Vec<Uuid> = records.iter().map(|record| record.id).collect();
-    let custom_values = fetch_custom_fields(&state, "volunteer", &ids, &form_fields).await?;
-
-    Ok(Json(
-        records
-            .into_iter()
-            .map(|model| {
-                let values = custom_values.get(&model.id).cloned().unwrap_or_default();
-                model_to_volunteer_response(model, values)
-            })
-            .collect(),
-    ))
 }
 
 /// 查询竞赛记录（学生或审核角色）。
@@ -381,58 +272,26 @@ pub async fn list_contest_records(
     let ids: Vec<Uuid> = records.iter().map(|record| record.id).collect();
     let custom_values = fetch_custom_fields(&state, "contest", &ids, &form_fields).await?;
 
+    let rule_config = load_labor_hour_rules(&state).await?;
     let mut responses = Vec::with_capacity(records.len());
     for record in records {
         let match_status = contest_match_status(&state, &record.contest_name).await?;
+        let recommended_hours = compute_recommended_hours(
+            rule_config,
+            record.contest_category.as_deref(),
+            record.contest_level.as_deref(),
+            record.contest_role.as_deref(),
+        );
         let values = custom_values.get(&record.id).cloned().unwrap_or_default();
-        responses.push(model_to_contest_response(record, &match_status, values));
+        responses.push(model_to_contest_response(
+            record,
+            &match_status,
+            recommended_hours,
+            values,
+        ));
     }
 
     Ok(Json(responses))
-}
-
-/// 审核志愿服务记录（审核人员/教师）。
-pub async fn review_volunteer_record(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(record_id): Path<Uuid>,
-    Json(payload): Json<ReviewRequest>,
-) -> Result<Json<VolunteerRecordResponse>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    ensure_review_permission(&user, &payload.stage)?;
-    payload
-        .validate()
-        .map_err(|_| AppError::validation("invalid review payload"))?;
-
-    let record = VolunteerRecord::find()
-        .filter(volunteer_records::Column::Id.eq(record_id))
-        .filter(volunteer_records::Column::IsDeleted.eq(false))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?
-        .ok_or_else(|| AppError::not_found("record not found"))?;
-
-    let mut active: volunteer_records::ActiveModel = record.into();
-    apply_review_update(&payload, &mut active.status, &mut active.rejection_reason)?;
-    if payload.stage == REVIEW_STAGE_FIRST {
-        active.first_review_hours = Set(Some(payload.hours));
-    } else {
-        active.final_review_hours = Set(Some(payload.hours));
-    }
-    active.updated_at = Set(Utc::now());
-
-    let model = active
-        .update(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let form_fields = load_form_fields(&state, "volunteer").await?;
-    let model_id = model.id;
-    let custom_values = fetch_custom_fields(&state, "volunteer", &[model_id], &form_fields).await?;
-    Ok(Json(model_to_volunteer_response(
-        model,
-        custom_values.get(&model_id).cloned().unwrap_or_default(),
-    )))
 }
 
 /// 审核竞赛记录（审核人员/教师）。
@@ -471,50 +330,47 @@ pub async fn review_contest_record(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     let match_status = contest_match_status(&state, &model.contest_name).await?;
+    let rule_config = load_labor_hour_rules(&state).await?;
+    let recommended_hours = compute_recommended_hours(
+        rule_config,
+        model.contest_category.as_deref(),
+        model.contest_level.as_deref(),
+        model.contest_role.as_deref(),
+    );
     let form_fields = load_form_fields(&state, "contest").await?;
     let model_id = model.id;
     let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
     Ok(Json(model_to_contest_response(
         model,
         &match_status,
+        recommended_hours,
         custom_values.get(&model_id).cloned().unwrap_or_default(),
     )))
-}
-
-fn model_to_volunteer_response(
-    model: volunteer_records::Model,
-    custom_fields: Vec<CustomFieldValueResponse>,
-) -> VolunteerRecordResponse {
-    VolunteerRecordResponse {
-        id: model.id,
-        student_id: model.student_id,
-        title: model.title,
-        description: model.description,
-        self_hours: model.self_hours,
-        first_review_hours: model.first_review_hours,
-        final_review_hours: model.final_review_hours,
-        status: model.status,
-        rejection_reason: model.rejection_reason,
-        custom_fields,
-    }
 }
 
 fn model_to_contest_response(
     model: contest_records::Model,
     match_status: &str,
+    recommended_hours: i32,
     custom_fields: Vec<CustomFieldValueResponse>,
 ) -> ContestRecordResponse {
     ContestRecordResponse {
         id: model.id,
         student_id: model.student_id,
         contest_name: model.contest_name,
+        contest_year: model.contest_year,
+        contest_category: model.contest_category,
+        contest_level: model.contest_level,
+        contest_role: model.contest_role,
         award_level: model.award_level,
+        award_date: model.award_date.map(|value| value.to_rfc3339()),
         self_hours: model.self_hours,
         first_review_hours: model.first_review_hours,
         final_review_hours: model.final_review_hours,
         status: model.status,
         rejection_reason: model.rejection_reason,
         match_status: match_status.to_string(),
+        recommended_hours,
         custom_fields,
     }
 }
@@ -565,6 +421,24 @@ fn apply_review_update(
 
     *rejection_reason = Set(None);
     Ok(())
+}
+
+fn parse_award_date(value: Option<&str>) -> Result<Option<chrono::DateTime<chrono::Utc>>, AppError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(Some(dt.with_timezone(&Utc)));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        let dt = date.and_hms_opt(0, 0, 0).ok_or_else(|| AppError::validation("invalid award date"))?;
+        return Ok(Some(chrono::DateTime::<Utc>::from_utc(dt, Utc)));
+    }
+    Err(AppError::validation("invalid award date"))
 }
 
 async fn load_form_fields(
@@ -742,7 +616,7 @@ mod tests {
         let fields = vec![
             form_fields::Model {
                 id: Uuid::new_v4(),
-                form_type: "volunteer".to_string(),
+                form_type: "contest".to_string(),
                 field_key: "location".to_string(),
                 label: "地点".to_string(),
                 field_type: "text".to_string(),
@@ -753,7 +627,7 @@ mod tests {
             },
             form_fields::Model {
                 id: Uuid::new_v4(),
-                form_type: "volunteer".to_string(),
+                form_type: "contest".to_string(),
                 field_key: "note".to_string(),
                 label: "备注".to_string(),
                 field_type: "text".to_string(),
@@ -778,30 +652,16 @@ mod tests {
 
     #[test]
     fn model_to_response_copies_fields() {
-        let model = volunteer_records::Model {
-            id: Uuid::new_v4(),
-            student_id: Uuid::new_v4(),
-            title: "标题".to_string(),
-            description: "描述".to_string(),
-            self_hours: 2,
-            first_review_hours: None,
-            final_review_hours: None,
-            status: STATUS_SUBMITTED.to_string(),
-            rejection_reason: None,
-            is_deleted: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let response = model_to_volunteer_response(model.clone(), Vec::new());
-        assert_eq!(response.id, model.id);
-        assert_eq!(response.title, "标题");
-        assert_eq!(response.status, STATUS_SUBMITTED);
-
         let contest = contest_records::Model {
             id: Uuid::new_v4(),
-            student_id: model.student_id,
+            student_id: Uuid::new_v4(),
+            contest_year: Some(2024),
+            contest_category: Some("A".to_string()),
             contest_name: "竞赛".to_string(),
+            contest_level: Some("国家级".to_string()),
+            contest_role: Some("负责人".to_string()),
             award_level: "一等奖".to_string(),
+            award_date: None,
             self_hours: 3,
             first_review_hours: None,
             final_review_hours: None,
@@ -811,7 +671,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let contest_resp = model_to_contest_response(contest, "matched", Vec::new());
+        let contest_resp = model_to_contest_response(contest, "matched", 2, Vec::new());
         assert_eq!(contest_resp.match_status, "matched");
         assert_eq!(contest_resp.contest_name, "竞赛");
     }

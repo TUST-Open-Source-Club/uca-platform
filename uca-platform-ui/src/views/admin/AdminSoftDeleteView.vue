@@ -1,27 +1,24 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { deleteContestRecord, deleteStudent, deleteVolunteerRecord } from '../../api/admin'
-import { queryContest, queryVolunteer } from '../../api/records'
+import { deleteContestRecord, deleteStudent } from '../../api/admin'
+import { queryContest } from '../../api/records'
 import { queryStudents } from '../../api/students'
 import { useRequest } from '../../composables/useRequest'
 
 const router = useRouter()
 const students = ref<any[]>([])
-const volunteerRecords = ref<any[]>([])
 const contestRecords = ref<any[]>([])
 const listDataRequest = useRequest()
 const deleteRequest = useRequest()
 
 const loadDataLists = async () => {
   await listDataRequest.run(async () => {
-    const [studentList, volunteerList, contestList] = await Promise.all([
+    const [studentList, contestList] = await Promise.all([
       queryStudents({}),
-      queryVolunteer(),
       queryContest(),
     ])
     students.value = studentList
-    volunteerRecords.value = volunteerList
     contestRecords.value = contestList
   })
 }
@@ -31,13 +28,6 @@ const handleDeleteStudent = async (studentNo: string) => {
     await deleteStudent(studentNo)
     await loadDataLists()
   }, { successMessage: '学生已删除' })
-}
-
-const handleDeleteVolunteerRecord = async (recordId: string) => {
-  await deleteRequest.run(async () => {
-    await deleteVolunteerRecord(recordId)
-    await loadDataLists()
-  }, { successMessage: '志愿记录已删除' })
 }
 
 const handleDeleteContestRecord = async (recordId: string) => {
@@ -75,25 +65,6 @@ const handleOpenPurge = async () => {
               size="small"
               :loading="deleteRequest.loading"
               @click="handleDeleteStudent(scope.row.student_no)"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <h4 style="margin-top: 16px">志愿服务记录</h4>
-      <el-table :data="volunteerRecords">
-        <el-table-column prop="title" label="标题" />
-        <el-table-column prop="status" label="状态" />
-        <el-table-column label="操作">
-          <template #default="scope">
-            <el-button
-              type="danger"
-              size="small"
-              :disabled="scope.row.status !== 'submitted'"
-              :loading="deleteRequest.loading"
-              @click="handleDeleteVolunteerRecord(scope.row.id)"
             >
               删除
             </el-button>

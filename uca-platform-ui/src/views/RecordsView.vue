@@ -1,21 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { queryContest, queryVolunteer } from '../api/records'
+import { queryContest } from '../api/records'
 import { useRequest } from '../composables/useRequest'
 
 const status = ref('')
-const volunteer = ref('')
 const contest = ref('')
 const request = useRequest()
 
 const handleLoad = async () => {
   await request.run(
     async () => {
-      const [volunteerData, contestData] = await Promise.all([
-        queryVolunteer(status.value || undefined),
-        queryContest(status.value || undefined),
-      ])
-      volunteer.value = JSON.stringify(volunteerData, null, 2)
+      const contestData = await queryContest(status.value || undefined)
       contest.value = JSON.stringify(contestData, null, 2)
     },
     { successMessage: '已加载记录' },
@@ -26,7 +21,7 @@ const handleLoad = async () => {
 <template>
   <section class="hero">
     <h1>我的记录</h1>
-    <p>查看志愿服务与竞赛获奖审核进度与附件。</p>
+    <p>查看竞赛获奖审核进度与附件。</p>
   </section>
 
   <el-card class="card">
@@ -55,10 +50,6 @@ const handleLoad = async () => {
   />
 
   <div class="card-grid" style="margin-top: 20px">
-    <el-card class="card">
-      <h3>志愿服务记录</h3>
-      <pre v-if="volunteer">{{ volunteer }}</pre>
-    </el-card>
     <el-card class="card">
       <h3>竞赛获奖记录</h3>
       <pre v-if="contest">{{ contest }}</pre>

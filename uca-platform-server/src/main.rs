@@ -1,4 +1,4 @@
-//! UCA Platform 服务端入口。
+//! Labor Hours Platform 服务端入口。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ async fn main() -> Result<(), AppError> {
 
     let mut builder = WebauthnBuilder::new(&config.rp_id, &config.rp_origin)
         .map_err(|err| AppError::internal(&format!("webauthn config error: {err}")))?;
-    builder = builder.rp_name("UCA Platform");
+    builder = builder.rp_name("Labor Hours Platform");
     let webauthn = builder
         .build()
         .map_err(|err| AppError::internal(&format!("webauthn build error: {err}")))?;

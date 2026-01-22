@@ -6,7 +6,7 @@ use calamine::{Data, Reader};
 use chrono::{Duration as ChronoDuration, Utc};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use uuid::Uuid;
 use validator::Validate;
@@ -16,14 +16,19 @@ use crate::{
     auth::{generate_token, hash_password, hash_token},
     entities::{
         attachments, auth_resets, competition_library, contest_records, form_field_values, form_fields,
-        invites, review_signatures, students, users, volunteer_records, Attachment,
-        CompetitionLibrary, ContestRecord, FormField, FormFieldValue, ReviewSignature, Student,
-        User, VolunteerRecord,
+        import_template_fields, import_templates, invites, review_signatures, students, users,
+        Attachment, CompetitionLibrary, ContestRecord, FormField, FormFieldValue,
+        ImportTemplate, ImportTemplateField, ReviewSignature, Student, User,
     },
     error::AppError,
+    labor_hours::{load_labor_hour_rules, upsert_labor_hour_rules, LaborHourRuleConfig},
     mailer::send_mail,
     policy::{load_password_policy, upsert_password_policy},
     state::AppState,
+    templates::{
+        load_export_template, load_import_template, map_import_fields, upsert_export_template,
+        ExportTemplateConfig, ImportFieldConfig, ImportTemplateConfig,
+    },
 };
 
 /// 竞赛库新增请求。
@@ -32,6 +37,10 @@ pub struct CreateCompetitionRequest {
     /// 竞赛名称。
     #[validate(length(min = 1, max = 200))]
     pub name: String,
+    /// 竞赛年份。
+    pub year: Option<i32>,
+    /// 竞赛类型（A/B）。
+    pub category: Option<String>,
 }
 
 /// 竞赛库响应。
@@ -39,8 +48,25 @@ pub struct CreateCompetitionRequest {
 pub struct CompetitionResponse {
     /// 记录 ID。
     pub id: Uuid,
+    /// 竞赛年份。
+    pub year: Option<i32>,
+    /// 竞赛类型。
+    pub category: Option<String>,
     /// 竞赛名称。
     pub name: String,
+}
+
+/// 劳动学时规则请求。
+#[derive(Debug, Deserialize)]
+pub struct LaborHourRuleRequest {
+    pub base_hours_a: i32,
+    pub base_hours_b: i32,
+    pub national_leader_hours: i32,
+    pub national_member_hours: i32,
+    pub provincial_leader_hours: i32,
+    pub provincial_member_hours: i32,
+    pub school_leader_hours: i32,
+    pub school_member_hours: i32,
 }
 
 /// 新建用户请求。
@@ -89,6 +115,74 @@ pub struct PasswordPolicyResponse {
     pub require_symbol: bool,
 }
 
+/// 导入模板字段请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct ImportTemplateFieldRequest {
+    /// 字段 key。
+    #[validate(length(min = 1, max = 64))]
+    pub field_key: String,
+    /// 字段标签。
+    #[validate(length(min = 1, max = 64))]
+    pub label: String,
+    /// Excel 表头。
+    #[validate(length(max = 128))]
+    pub column_title: String,
+    /// 是否必填。
+    pub required: bool,
+    /// 排序序号。
+    pub order_index: i32,
+    /// 字段说明。
+    pub description: Option<String>,
+}
+
+/// 导入模板更新请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct ImportTemplateRequest {
+    /// 模板名称。
+    #[validate(length(min = 1, max = 64))]
+    pub name: String,
+    /// 字段列表。
+    #[validate(length(min = 1))]
+    pub fields: Vec<ImportTemplateFieldRequest>,
+}
+
+/// 导入模板响应。
+#[derive(Debug, Serialize)]
+pub struct ImportTemplateResponse {
+    pub template_key: String,
+    pub name: String,
+    pub fields: Vec<ImportTemplateFieldResponse>,
+}
+
+/// 导入模板字段响应。
+#[derive(Debug, Serialize)]
+pub struct ImportTemplateFieldResponse {
+    pub field_key: String,
+    pub label: String,
+    pub column_title: String,
+    pub required: bool,
+    pub order_index: i32,
+    pub description: Option<String>,
+}
+
+/// 导出模板请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct ExportTemplateRequest {
+    /// 模板名称。
+    #[validate(length(min = 1, max = 64))]
+    pub name: String,
+    /// 布局 JSON。
+    pub layout: serde_json::Value,
+}
+
+/// 导出模板响应。
+#[derive(Debug, Serialize)]
+pub struct ExportTemplateResponse {
+    pub template_key: String,
+    pub name: String,
+    pub layout: serde_json::Value,
+}
+
 /// 重置认证方式请求。
 #[derive(Debug, Deserialize)]
 pub struct ResetUserRequest {
@@ -116,14 +210,6 @@ const INVITE_TTL_HOURS: i64 = 72;
 const RESET_TTL_MINUTES: i64 = 30;
 
 const COMPETITION_HEADER: [&str; 2] = ["竞赛名称", "name"];
-const VOLUNTEER_BASE_HEADERS: [(&str, &[&str]); 6] = [
-    ("student_no", &["学号", "student_no"]),
-    ("title", &["标题", "志愿服务标题", "title"]),
-    ("description", &["描述", "志愿服务内容", "description"]),
-    ("self_hours", &["自评学时", "self_hours"]),
-    ("first_review_hours", &["初审学时", "first_review_hours"]),
-    ("final_review_hours", &["复审学时", "final_review_hours"]),
-];
 const CONTEST_BASE_HEADERS: [(&str, &[&str]); 6] = [
     ("student_no", &["学号", "student_no"]),
     ("contest_name", &["竞赛名称", "contest_name"]),
@@ -134,6 +220,8 @@ const CONTEST_BASE_HEADERS: [(&str, &[&str]); 6] = [
 ];
 const STATUS_HEADERS: [&str; 2] = ["审核状态", "status"];
 const REJECTION_HEADERS: [&str; 2] = ["不通过原因", "rejection_reason"];
+const IMPORT_TEMPLATE_KEYS: [&str; 3] = ["competition_library", "students", "contest_records"];
+const EXPORT_TEMPLATE_KEYS: [&str; 1] = ["labor_hours"];
 
 /// 查询竞赛库。
 pub async fn list_competitions(
@@ -151,18 +239,20 @@ pub async fn list_competitions(
     Ok(Json(
         items
             .into_iter()
-            .map(|item| CompetitionResponse { id: item.id, name: item.name })
+            .map(|item| CompetitionResponse {
+                id: item.id,
+                year: item.year,
+                category: item.category,
+                name: item.name,
+            })
             .collect(),
     ))
 }
 
-/// 竞赛库公开读取（需登录）。
+/// 竞赛库公开读取（无需登录）。
 pub async fn list_competitions_public(
     State(state): State<AppState>,
-    jar: CookieJar,
 ) -> Result<Json<Vec<CompetitionResponse>>, AppError> {
-    let _user = require_session_user(&state, &jar).await?;
-
     let items = CompetitionLibrary::find()
         .all(&state.db)
         .await
@@ -171,7 +261,12 @@ pub async fn list_competitions_public(
     Ok(Json(
         items
             .into_iter()
-            .map(|item| CompetitionResponse { id: item.id, name: item.name })
+            .map(|item| CompetitionResponse {
+                id: item.id,
+                year: item.year,
+                category: item.category,
+                name: item.name,
+            })
             .collect(),
     ))
 }
@@ -202,6 +297,8 @@ pub async fn create_competition(
     let name = payload.name;
     let model = competition_library::ActiveModel {
         id: Set(id),
+        year: Set(payload.year),
+        category: Set(payload.category.map(|value| value.to_uppercase())),
         name: Set(name.clone()),
         created_at: Set(now),
         updated_at: Set(now),
@@ -211,7 +308,12 @@ pub async fn create_competition(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    Ok(Json(CompetitionResponse { id, name }))
+    Ok(Json(CompetitionResponse {
+        id,
+        year: payload.year,
+        category: payload.category.map(|value| value.to_uppercase()),
+        name,
+    }))
 }
 
 /// 管理员创建用户或发送邀请。
@@ -344,7 +446,7 @@ pub async fn create_user(
 
     let link = format!("{}/invite?token={}", base_url, token);
     let body = format!(
-        "您好，\n\n您被邀请加入 UCA Platform，请点击以下链接完成注册并绑定 TOTP 或 Passkey：\n{}\n\n该链接 {} 小时后失效。",
+        "您好，\n\n您被邀请加入 Labor Hours Platform，请点击以下链接完成注册并绑定 TOTP 或 Passkey：\n{}\n\n该链接 {} 小时后失效。",
         link, INVITE_TTL_HOURS
     );
     send_mail(mail_config, &email, "账号邀请", &body).await?;
@@ -397,6 +499,60 @@ pub async fn update_password_policy(
         require_lowercase: updated.require_lowercase,
         require_digit: updated.require_digit,
         require_symbol: updated.require_symbol,
+    }))
+}
+
+/// 获取劳动学时规则。
+pub async fn get_labor_hour_rules(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<LaborHourRuleRequest>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    let rules = load_labor_hour_rules(&state).await?;
+    Ok(Json(LaborHourRuleRequest {
+        base_hours_a: rules.base_hours_a,
+        base_hours_b: rules.base_hours_b,
+        national_leader_hours: rules.national_leader_hours,
+        national_member_hours: rules.national_member_hours,
+        provincial_leader_hours: rules.provincial_leader_hours,
+        provincial_member_hours: rules.provincial_member_hours,
+        school_leader_hours: rules.school_leader_hours,
+        school_member_hours: rules.school_member_hours,
+    }))
+}
+
+/// 更新劳动学时规则。
+pub async fn update_labor_hour_rules(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<LaborHourRuleRequest>,
+) -> Result<Json<LaborHourRuleRequest>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    let updated = upsert_labor_hour_rules(
+        &state,
+        LaborHourRuleConfig {
+            base_hours_a: payload.base_hours_a,
+            base_hours_b: payload.base_hours_b,
+            national_leader_hours: payload.national_leader_hours,
+            national_member_hours: payload.national_member_hours,
+            provincial_leader_hours: payload.provincial_leader_hours,
+            provincial_member_hours: payload.provincial_member_hours,
+            school_leader_hours: payload.school_leader_hours,
+            school_member_hours: payload.school_member_hours,
+        },
+    )
+    .await?;
+    Ok(Json(LaborHourRuleRequest {
+        base_hours_a: updated.base_hours_a,
+        base_hours_b: updated.base_hours_b,
+        national_leader_hours: updated.national_leader_hours,
+        national_member_hours: updated.national_member_hours,
+        provincial_leader_hours: updated.provincial_leader_hours,
+        provincial_member_hours: updated.provincial_member_hours,
+        school_leader_hours: updated.school_leader_hours,
+        school_member_hours: updated.school_member_hours,
     }))
 }
 
@@ -595,17 +751,27 @@ pub async fn import_competitions(
         .worksheet_range(&sheet_name)
         .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
+    let template = load_import_template(&state, "competition_library").await?;
     let header_index = build_header_index(range.rows().next());
-    let name_idx = find_header_index(&header_index, &COMPETITION_HEADER)
-        .ok_or_else(|| AppError::bad_request("missing competition header"))?;
+    let field_map = map_import_fields(&header_index, &template.fields)?;
 
     let mut inserted = 0usize;
     let mut skipped = 0usize;
     for row in range.rows().skip(1) {
-        let name = read_cell_by_index(name_idx, row);
+        let name = field_map
+            .get("contest_name")
+            .map(|idx| read_cell_by_index(*idx, row))
+            .unwrap_or_default();
         if name.is_empty() {
             continue;
         }
+        let year = field_map
+            .get("contest_year")
+            .and_then(|idx| read_cell_by_index(*idx, row).parse::<i32>().ok());
+        let category = field_map
+            .get("contest_category")
+            .map(|idx| read_cell_by_index(*idx, row))
+            .filter(|value| !value.is_empty());
         let exists = CompetitionLibrary::find()
             .filter(competition_library::Column::Name.eq(&name))
             .one(&state.db)
@@ -618,6 +784,8 @@ pub async fn import_competitions(
         let now = Utc::now();
         let model = competition_library::ActiveModel {
             id: Set(Uuid::new_v4()),
+            year: Set(year),
+            category: Set(category.map(|value| value.to_uppercase())),
             name: Set(name),
             created_at: Set(now),
             updated_at: Set(now),
@@ -742,19 +910,172 @@ pub async fn create_form_field(
     }))
 }
 
-/// 已删除志愿记录响应。
-#[derive(Debug, Serialize)]
-pub struct DeletedVolunteerRecordResponse {
-    /// 记录 ID。
-    pub id: Uuid,
-    /// 学生 ID。
-    pub student_id: Uuid,
-    /// 标题。
-    pub title: String,
-    /// 状态。
-    pub status: String,
-    /// 创建时间。
-    pub created_at: chrono::DateTime<chrono::Utc>,
+/// 获取导入模板列表（仅管理员）。
+pub async fn list_import_templates(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<ImportTemplateResponse>>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+
+    let mut templates = Vec::new();
+    for key in IMPORT_TEMPLATE_KEYS {
+        let config = load_import_template(&state, key).await?;
+        templates.push(import_template_to_response(config));
+    }
+    Ok(Json(templates))
+}
+
+/// 更新导入模板（仅管理员）。
+pub async fn update_import_template(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(template_key): Path<String>,
+    Json(payload): Json<ImportTemplateRequest>,
+) -> Result<Json<ImportTemplateResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    payload
+        .validate()
+        .map_err(|_| AppError::validation("invalid import template payload"))?;
+
+    if !IMPORT_TEMPLATE_KEYS.contains(&template_key.as_str()) {
+        return Err(AppError::bad_request("unknown template key"));
+    }
+
+    let mut seen = HashSet::new();
+    for field in &payload.fields {
+        field
+            .validate()
+            .map_err(|_| AppError::validation("invalid import template field"))?;
+        if field.required && field.column_title.trim().is_empty() {
+            return Err(AppError::validation("required column title missing"));
+        }
+        if !seen.insert(field.field_key.as_str()) {
+            return Err(AppError::validation("duplicate field key"));
+        }
+    }
+
+    let transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let now = Utc::now();
+    let template = ImportTemplate::find()
+        .filter(import_templates::Column::TemplateKey.eq(&template_key))
+        .one(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    let template_id = if let Some(existing) = template {
+        let mut active: import_templates::ActiveModel = existing.into();
+        active.name = Set(payload.name.clone());
+        active.updated_at = Set(now);
+        let updated = active
+            .update(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        updated.id
+    } else {
+        let model = import_templates::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            template_key: Set(template_key.clone()),
+            name: Set(payload.name.clone()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        import_templates::Entity::insert(model)
+            .exec(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .last_insert_id
+    };
+
+    ImportTemplateField::delete_many()
+        .filter(import_template_fields::Column::TemplateId.eq(template_id))
+        .exec(&transaction)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    for field in &payload.fields {
+        let model = import_template_fields::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            template_id: Set(template_id),
+            field_key: Set(field.field_key.clone()),
+            label: Set(field.label.clone()),
+            column_title: Set(field.column_title.clone()),
+            required: Set(field.required),
+            order_index: Set(field.order_index),
+            description: Set(field.description.clone()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        import_template_fields::Entity::insert(model)
+            .exec_without_returning(&transaction)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    transaction
+        .commit()
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let config = ImportTemplateConfig {
+        template_key,
+        name: payload.name,
+        fields: payload
+            .fields
+            .into_iter()
+            .map(|field| ImportFieldConfig {
+                field_key: field.field_key,
+                label: field.label,
+                column_title: field.column_title,
+                required: field.required,
+                order_index: field.order_index,
+                description: field.description,
+            })
+            .collect(),
+    };
+    Ok(Json(import_template_to_response(config)))
+}
+
+/// 获取导出模板（仅管理员）。
+pub async fn get_export_template(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(template_key): Path<String>,
+) -> Result<Json<ExportTemplateResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    if !EXPORT_TEMPLATE_KEYS.contains(&template_key.as_str()) {
+        return Err(AppError::bad_request("unknown template key"));
+    }
+
+    let config = load_export_template(&state, &template_key).await?;
+    Ok(Json(export_template_to_response(config)))
+}
+
+/// 更新导出模板（仅管理员）。
+pub async fn update_export_template(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(template_key): Path<String>,
+    Json(payload): Json<ExportTemplateRequest>,
+) -> Result<Json<ExportTemplateResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    payload
+        .validate()
+        .map_err(|_| AppError::validation("invalid export template payload"))?;
+    if !EXPORT_TEMPLATE_KEYS.contains(&template_key.as_str()) {
+        return Err(AppError::bad_request("unknown template key"));
+    }
+
+    let updated =
+        upsert_export_template(&state, &template_key, payload.name, payload.layout).await?;
+    Ok(Json(export_template_to_response(updated)))
 }
 
 /// 已删除竞赛记录响应。
@@ -790,34 +1111,6 @@ pub async fn list_deleted_students(
         results
             .into_iter()
             .map(crate::routes::students::StudentResponse::from)
-            .collect(),
-    ))
-}
-
-/// 获取已删除志愿服务记录（仅管理员）。
-pub async fn list_deleted_volunteer_records(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> Result<Json<Vec<DeletedVolunteerRecordResponse>>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-
-    let records = VolunteerRecord::find()
-        .filter(volunteer_records::Column::IsDeleted.eq(true))
-        .all(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    Ok(Json(
-        records
-            .into_iter()
-            .map(|record| DeletedVolunteerRecordResponse {
-                id: record.id,
-                student_id: record.student_id,
-                title: record.title,
-                status: record.status,
-                created_at: record.created_at,
-            })
             .collect(),
     ))
 }
@@ -907,34 +1200,12 @@ pub async fn purge_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    let volunteer_records = VolunteerRecord::find()
-        .filter(volunteer_records::Column::StudentId.eq(student.id))
-        .all(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
     let contest_records = ContestRecord::find()
         .filter(contest_records::Column::StudentId.eq(student.id))
         .all(&transaction)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let volunteer_ids: Vec<Uuid> = volunteer_records.iter().map(|record| record.id).collect();
     let contest_ids: Vec<Uuid> = contest_records.iter().map(|record| record.id).collect();
-
-    if !volunteer_ids.is_empty() {
-        FormFieldValue::delete_many()
-            .filter(form_field_values::Column::RecordType.eq("volunteer"))
-            .filter(form_field_values::Column::RecordId.is_in(volunteer_ids.iter().cloned()))
-            .exec(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        ReviewSignature::delete_many()
-            .filter(review_signatures::Column::RecordType.eq("volunteer"))
-            .filter(review_signatures::Column::RecordId.is_in(volunteer_ids.iter().cloned()))
-            .exec(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-    }
 
     if !contest_ids.is_empty() {
         FormFieldValue::delete_many()
@@ -957,105 +1228,12 @@ pub async fn purge_student(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
 
-    VolunteerRecord::delete_many()
-        .filter(volunteer_records::Column::StudentId.eq(student.id))
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
     ContestRecord::delete_many()
         .filter(contest_records::Column::StudentId.eq(student.id))
         .exec(&transaction)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
     Student::delete_by_id(student.id)
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    transaction
-        .commit()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    Ok(Json(serde_json::json!({ "deleted": true })))
-}
-
-/// 删除未审核志愿记录（仅管理员，软删除）。
-pub async fn delete_volunteer_record(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(record_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-
-    let record = VolunteerRecord::find()
-        .filter(volunteer_records::Column::Id.eq(record_id))
-        .filter(volunteer_records::Column::IsDeleted.eq(false))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?
-        .ok_or_else(|| AppError::not_found("record not found"))?;
-
-    if record.status != "submitted" {
-        return Err(AppError::bad_request("reviewed record cannot be deleted"));
-    }
-
-    let mut active: volunteer_records::ActiveModel = record.into();
-    active.is_deleted = Set(true);
-    active.updated_at = Set(Utc::now());
-    active
-        .update(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    Ok(Json(serde_json::json!({ "deleted": true })))
-}
-
-/// 彻底删除志愿记录（仅管理员）。
-pub async fn purge_volunteer_record(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(record_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-
-    let record = VolunteerRecord::find()
-        .filter(volunteer_records::Column::Id.eq(record_id))
-        .one(&state.db)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?
-        .ok_or_else(|| AppError::not_found("record not found"))?;
-    if !record.is_deleted {
-        return Err(AppError::bad_request("record must be soft deleted first"));
-    }
-
-    let transaction = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    FormFieldValue::delete_many()
-        .filter(form_field_values::Column::RecordType.eq("volunteer"))
-        .filter(form_field_values::Column::RecordId.eq(record_id))
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-    ReviewSignature::delete_many()
-        .filter(review_signatures::Column::RecordType.eq("volunteer"))
-        .filter(review_signatures::Column::RecordId.eq(record_id))
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-    Attachment::delete_many()
-        .filter(attachments::Column::RecordType.eq("volunteer"))
-        .filter(attachments::Column::RecordId.eq(record_id))
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-    VolunteerRecord::delete_by_id(record_id)
         .exec(&transaction)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
@@ -1156,126 +1334,6 @@ pub async fn purge_contest_record(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-/// 批量导入志愿服务记录（仅管理员）。
-pub async fn import_volunteer_records(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    mut multipart: Multipart,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-
-    let file_bytes = read_upload_bytes(&mut multipart).await?;
-    let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
-        .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
-    let sheet_name = workbook
-        .sheet_names()
-        .first()
-        .cloned()
-        .ok_or_else(|| AppError::bad_request("xlsx has no sheets"))?;
-    let range = workbook
-        .worksheet_range(&sheet_name)
-        .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
-
-    let header_index = build_header_index(range.rows().next());
-    let base_index = map_base_indices(&header_index, &VOLUNTEER_BASE_HEADERS);
-    ensure_required_headers(&base_index, &["student_no", "title", "description", "self_hours"])?;
-    let status_idx = find_header_index(&header_index, &STATUS_HEADERS);
-    let rejection_idx = find_header_index(&header_index, &REJECTION_HEADERS);
-
-    let field_map = load_form_field_map(&state, "volunteer").await?;
-
-    let transaction = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let mut inserted = 0usize;
-    let mut skipped = 0usize;
-    for row in range.rows().skip(1) {
-        let student_no = read_cell_by_index_opt(base_index.get("student_no"), row);
-        if student_no.is_empty() {
-            skipped += 1;
-            continue;
-        }
-
-        let student = Student::find()
-            .filter(students::Column::StudentNo.eq(&student_no))
-            .filter(students::Column::IsDeleted.eq(false))
-            .one(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        let student = match student {
-            Some(student) => student,
-            None => {
-                skipped += 1;
-                continue;
-            }
-        };
-
-        let title = read_cell_by_index_opt(base_index.get("title"), row);
-        let description = read_cell_by_index_opt(base_index.get("description"), row);
-        let self_hours = parse_hours(read_cell_by_index_opt(base_index.get("self_hours"), row));
-        if title.is_empty() || description.is_empty() || self_hours.is_none() {
-            skipped += 1;
-            continue;
-        }
-
-        let first_review = parse_hours(read_cell_by_index_opt(base_index.get("first_review_hours"), row));
-        let final_review = parse_hours(read_cell_by_index_opt(base_index.get("final_review_hours"), row));
-        let status_value = read_cell_by_index_opt(status_idx.as_ref(), row);
-        let rejection = read_cell_by_index_opt(rejection_idx.as_ref(), row);
-        let status = resolve_status(&status_value, first_review, final_review);
-
-        let now = Utc::now();
-        let record_id = Uuid::new_v4();
-        let model = volunteer_records::ActiveModel {
-            id: Set(record_id),
-            student_id: Set(student.id),
-            title: Set(title),
-            description: Set(description),
-            self_hours: Set(self_hours.unwrap_or(0)),
-            first_review_hours: Set(first_review),
-            final_review_hours: Set(final_review),
-            status: Set(status),
-            rejection_reason: Set(if rejection.is_empty() { None } else { Some(rejection) }),
-            is_deleted: Set(false),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        volunteer_records::Entity::insert(model)
-            .exec_without_returning(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-
-        let reserved_headers = collect_reserved_headers(
-            &header_index,
-            &VOLUNTEER_BASE_HEADERS,
-            &STATUS_HEADERS,
-            &REJECTION_HEADERS,
-        );
-        insert_custom_fields(
-            &transaction,
-            "volunteer",
-            record_id,
-            row,
-            &header_index,
-            &field_map,
-            &reserved_headers,
-        )
-        .await?;
-        inserted += 1;
-    }
-
-    transaction
-        .commit()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    Ok(Json(serde_json::json!({ "inserted": inserted, "skipped": skipped })))
-}
-
 /// 批量导入竞赛记录（仅管理员）。
 pub async fn import_contest_records(
     State(state): State<AppState>,
@@ -1297,11 +1355,9 @@ pub async fn import_contest_records(
         .worksheet_range(&sheet_name)
         .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
+    let template = load_import_template(&state, "contest_records").await?;
     let header_index = build_header_index(range.rows().next());
-    let base_index = map_base_indices(&header_index, &CONTEST_BASE_HEADERS);
-    ensure_required_headers(&base_index, &["student_no", "contest_name", "award_level", "self_hours"])?;
-    let status_idx = find_header_index(&header_index, &STATUS_HEADERS);
-    let rejection_idx = find_header_index(&header_index, &REJECTION_HEADERS);
+    let base_index = map_import_fields(&header_index, &template.fields)?;
 
     let field_map = load_form_field_map(&state, "contest").await?;
 
@@ -1335,26 +1391,44 @@ pub async fn import_contest_records(
         };
 
         let contest_name = read_cell_by_index_opt(base_index.get("contest_name"), row);
+        let contest_level = read_cell_by_index_opt(base_index.get("contest_level"), row);
+        let contest_role = read_cell_by_index_opt(base_index.get("contest_role"), row);
         let award_level = read_cell_by_index_opt(base_index.get("award_level"), row);
         let self_hours = parse_hours(read_cell_by_index_opt(base_index.get("self_hours"), row));
-        if contest_name.is_empty() || award_level.is_empty() || self_hours.is_none() {
+        let contest_year = read_cell_by_index_opt(base_index.get("contest_year"), row)
+            .parse::<i32>()
+            .ok();
+        let contest_category = read_cell_by_index_opt(base_index.get("contest_category"), row);
+        let award_date = read_cell_by_index_opt(base_index.get("award_date"), row);
+        if contest_name.is_empty()
+            || contest_level.is_empty()
+            || contest_role.is_empty()
+            || award_level.is_empty()
+            || self_hours.is_none()
+        {
             skipped += 1;
             continue;
         }
 
         let first_review = parse_hours(read_cell_by_index_opt(base_index.get("first_review_hours"), row));
         let final_review = parse_hours(read_cell_by_index_opt(base_index.get("final_review_hours"), row));
-        let status_value = read_cell_by_index_opt(status_idx.as_ref(), row);
-        let rejection = read_cell_by_index_opt(rejection_idx.as_ref(), row);
+        let status_value = read_cell_by_index_opt(base_index.get("status"), row);
+        let rejection = read_cell_by_index_opt(base_index.get("rejection_reason"), row);
         let status = resolve_status(&status_value, first_review, final_review);
 
         let now = Utc::now();
+        let award_date = parse_award_date_cell(&award_date)?;
         let record_id = Uuid::new_v4();
         let model = contest_records::ActiveModel {
             id: Set(record_id),
             student_id: Set(student.id),
+            contest_year: Set(contest_year),
+            contest_category: Set(if contest_category.is_empty() { None } else { Some(contest_category.to_uppercase()) }),
             contest_name: Set(contest_name),
+            contest_level: Set(Some(contest_level)),
+            contest_role: Set(Some(contest_role)),
             award_level: Set(award_level),
+            award_date: Set(award_date),
             self_hours: Set(self_hours.unwrap_or(0)),
             first_review_hours: Set(first_review),
             final_review_hours: Set(final_review),
@@ -1369,12 +1443,12 @@ pub async fn import_contest_records(
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
 
-        let reserved_headers = collect_reserved_headers(
-            &header_index,
-            &CONTEST_BASE_HEADERS,
-            &STATUS_HEADERS,
-            &REJECTION_HEADERS,
-        );
+        let reserved_headers = template
+            .fields
+            .iter()
+            .map(|field| field.column_title.clone())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
         insert_custom_fields(
             &transaction,
             "contest",
@@ -1446,6 +1520,33 @@ fn map_base_indices(
     result
 }
 
+fn import_template_to_response(template: ImportTemplateConfig) -> ImportTemplateResponse {
+    ImportTemplateResponse {
+        template_key: template.template_key,
+        name: template.name,
+        fields: template
+            .fields
+            .into_iter()
+            .map(|field| ImportTemplateFieldResponse {
+                field_key: field.field_key,
+                label: field.label,
+                column_title: field.column_title,
+                required: field.required,
+                order_index: field.order_index,
+                description: field.description,
+            })
+            .collect(),
+    }
+}
+
+fn export_template_to_response(template: ExportTemplateConfig) -> ExportTemplateResponse {
+    ExportTemplateResponse {
+        template_key: template.template_key,
+        name: template.name,
+        layout: template.layout,
+    }
+}
+
 fn ensure_required_headers(
     base_index: &HashMap<String, usize>,
     required: &[&str],
@@ -1470,6 +1571,23 @@ fn read_cell_by_index(idx: usize, row: &[Data]) -> String {
     row.get(idx)
         .map(|cell| cell.to_string().trim().to_string())
         .unwrap_or_default()
+}
+
+fn parse_award_date_cell(value: &str) -> Result<Option<chrono::DateTime<Utc>>, AppError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(Some(dt.with_timezone(&Utc)));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        let dt = date
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| AppError::validation("invalid award date"))?;
+        return Ok(Some(chrono::DateTime::<Utc>::from_utc(dt, Utc)));
+    }
+    Err(AppError::validation("invalid award date"))
 }
 
 fn parse_hours(value: String) -> Option<i32> {

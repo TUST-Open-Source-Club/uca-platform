@@ -17,6 +17,6 @@ describe('App', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain('UCA Platform')
+    expect(wrapper.text()).toContain('Labor Hours Platform')
   })
 })

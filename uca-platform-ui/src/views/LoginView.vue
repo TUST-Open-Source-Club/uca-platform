@@ -145,7 +145,7 @@ const handleLogin = async () => {
 
 <template>
   <section class="hero">
-    <h1>欢迎进入综测管理平台</h1>
+    <h1>欢迎进入劳动教育学时认定系统</h1>
     <p>请使用 Passkey 或 TOTP 完成认证。学生可使用密码登录。</p>
   </section>
 

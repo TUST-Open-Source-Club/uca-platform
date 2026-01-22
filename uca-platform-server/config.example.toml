@@ -1,4 +1,4 @@
-# UCA Platform 服务端配置示例（TOML）
+# Labor Hours Platform 服务端配置示例（TOML）
 # 提示：CONFIG_PATH 可指定此文件路径。
 
 # 是否启用开发者模式
@@ -44,7 +44,7 @@
 # smtp_username = "user@example.com"
 # smtp_password = "smtp-password"
 # from_address = "noreply@example.com"
-# from_name = "UCA Platform"
+# from_name = "Labor Hours Platform"
 # use_tls = true
 
 # 学生密码策略

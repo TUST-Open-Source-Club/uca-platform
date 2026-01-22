@@ -928,7 +928,7 @@ pub async fn totp_enroll_start(
             .map_err(|_| AppError::bad_request("invalid json payload"))?
     };
 
-    let (secret, url) = generate_totp("UCA Platform", &user.username)?;
+    let (secret, url) = generate_totp("Labor Hours Platform", &user.username)?;
     let encrypted = encrypt_secret(&secret, &state.config.auth_secret_key)?;
 
     let now = Utc::now();

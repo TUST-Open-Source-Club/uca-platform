@@ -39,6 +39,7 @@ pub struct ExportTemplateConfig {
     pub layout: Value,
 }
 
+/// 读取导入模板配置（不存在时返回默认模板）。
 pub async fn load_import_template(
     state: &AppState,
     template_key: &str,
@@ -76,6 +77,7 @@ pub async fn load_import_template(
     Ok(default_import_template(template_key))
 }
 
+/// 读取导出模板配置（不存在时返回默认模板）。
 pub async fn load_export_template(
     state: &AppState,
     template_key: &str,
@@ -98,6 +100,7 @@ pub async fn load_export_template(
     Ok(default_export_template(template_key))
 }
 
+/// 新增或更新导出模板配置。
 pub async fn upsert_export_template(
     state: &AppState,
     template_key: &str,
@@ -144,6 +147,7 @@ pub async fn upsert_export_template(
     })
 }
 
+/// 构建表头名称到列索引的映射。
 pub fn build_header_index(header_row: Option<&[Data]>) -> HashMap<String, usize> {
     let mut header_index = HashMap::new();
     if let Some(header_row) = header_row {
@@ -157,6 +161,7 @@ pub fn build_header_index(header_row: Option<&[Data]>) -> HashMap<String, usize>
     header_index
 }
 
+/// 根据表头名称读取单元格内容。
 pub fn read_cell_by_title(header_index: &HashMap<String, usize>, title: &str, row: &[Data]) -> String {
     if let Some(idx) = header_index.get(title) {
         return read_cell_by_index(*idx, row);
@@ -164,12 +169,14 @@ pub fn read_cell_by_title(header_index: &HashMap<String, usize>, title: &str, ro
     String::new()
 }
 
+/// 根据列索引读取单元格内容。
 pub fn read_cell_by_index(idx: usize, row: &[Data]) -> String {
     row.get(idx)
         .map(|cell| cell.to_string().trim().to_string())
         .unwrap_or_default()
 }
 
+/// 将导入模板字段映射到表头索引。
 pub fn map_import_fields(
     header_index: &HashMap<String, usize>,
     fields: &[ImportFieldConfig],
@@ -393,5 +400,54 @@ fn default_export_template(template_key: &str) -> ExportTemplateConfig {
         template_key: template_key.to_string(),
         name: "劳动教育学时认定表".to_string(),
         layout,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use calamine::Data;
+
+    #[test]
+    fn build_header_index_maps_columns() {
+        let header = vec![Data::String("学号".into()), Data::String("竞赛名称".into())];
+        let index = build_header_index(Some(&header));
+        assert_eq!(index.get("学号"), Some(&0));
+        assert_eq!(index.get("竞赛名称"), Some(&1));
+    }
+
+    #[test]
+    fn read_cell_by_title_uses_header_index() {
+        let header = vec![Data::String("学号".into()), Data::String("竞赛名称".into())];
+        let index = build_header_index(Some(&header));
+        let row = vec![Data::String("2023001".into()), Data::String("竞赛A".into())];
+        let value = read_cell_by_title(&index, "竞赛名称", &row);
+        assert_eq!(value, "竞赛A");
+    }
+
+    #[test]
+    fn map_import_fields_requires_headers() {
+        let header = vec![Data::String("学号".into())];
+        let index = build_header_index(Some(&header));
+        let fields = vec![
+            ImportFieldConfig {
+                field_key: "student_no".to_string(),
+                label: "学号".to_string(),
+                column_title: "学号".to_string(),
+                required: true,
+                order_index: 1,
+                description: None,
+            },
+            ImportFieldConfig {
+                field_key: "contest_name".to_string(),
+                label: "竞赛名称".to_string(),
+                column_title: "竞赛名称".to_string(),
+                required: true,
+                order_index: 2,
+                description: None,
+            },
+        ];
+        let result = map_import_fields(&index, &fields);
+        assert!(result.is_err());
     }
 }

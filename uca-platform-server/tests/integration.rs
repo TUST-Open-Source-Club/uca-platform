@@ -39,6 +39,7 @@ async fn setup_context() -> TestContext {
         database_url: database_url(),
         rp_id: "localhost".to_string(),
         rp_origin: Url::parse("http://localhost:8443").unwrap(),
+        base_url: Some(Url::parse("http://localhost:5173").unwrap()),
         tls_cert_path: "data/tls/cert.pem".into(),
         tls_key_path: "data/tls/key.enc".into(),
         tls_import_cert_path: None,
@@ -49,6 +50,9 @@ async fn setup_context() -> TestContext {
         session_ttl_seconds: 3600,
         auth_secret_key: vec![1u8; 32],
         bootstrap_token: None,
+        mail: None,
+        password_policy: ucaplatform::config::PasswordPolicy::default(),
+        reset_delivery: ucaplatform::config::ResetDelivery::Email,
     };
 
     let mut builder = WebauthnBuilder::new(&config.rp_id, &config.rp_origin).unwrap();
@@ -369,6 +373,99 @@ async fn admin_competitions_and_forms() {
         .header(header::COOKIE, cookie.clone())
         .body(Body::empty())
         .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_templates_and_rules() {
+    let ctx = setup_context().await;
+    reset_database(&ctx.state).await;
+
+    let admin = create_user(&ctx.state, "admin6", "admin").await;
+    let cookie = create_session_cookie(&ctx.state, admin.id).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/import-templates")
+        .header(header::COOKIE, cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let templates: Vec<serde_json::Value> = response_json(response).await;
+    assert!(!templates.is_empty());
+
+    let request = json_request(
+        "POST",
+        "/admin/import-templates/contest_records",
+        json!({
+            "name": "学生获奖情况清单",
+            "fields": [
+                { "field_key": "student_no", "label": "学号", "column_title": "学号", "required": true, "order_index": 1 },
+                { "field_key": "contest_name", "label": "竞赛名称", "column_title": "竞赛名称", "required": true, "order_index": 2 },
+                { "field_key": "contest_level", "label": "竞赛级别", "column_title": "竞赛级别", "required": true, "order_index": 3 },
+                { "field_key": "contest_role", "label": "角色", "column_title": "角色", "required": true, "order_index": 4 },
+                { "field_key": "award_level", "label": "获奖等级", "column_title": "获奖等级", "required": true, "order_index": 5 },
+                { "field_key": "self_hours", "label": "自评学时", "column_title": "自评学时", "required": true, "order_index": 6 }
+            ]
+        }),
+    )
+    .with_cookie(&cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/export-templates/labor_hours")
+        .header(header::COOKIE, cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = json_request(
+        "POST",
+        "/admin/export-templates/labor_hours",
+        json!({
+            "name": "劳动教育学时认定表",
+            "layout": {
+                "title": "劳动教育学时认定表",
+                "sections": [
+                    { "type": "info", "title": "学生信息", "fields": [{ "key": "student_no", "label": "学号" }] }
+                ],
+                "signature": { "first_label": "初审教师签名", "final_label": "复审教师签名" }
+            }
+        }),
+    )
+    .with_cookie(&cookie);
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/labor-hour-rules")
+        .header(header::COOKIE, cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = json_request(
+        "POST",
+        "/admin/labor-hour-rules",
+        json!({
+            "base_hours_a": 2,
+            "base_hours_b": 2,
+            "national_leader_hours": 4,
+            "national_member_hours": 2,
+            "provincial_leader_hours": 2,
+            "provincial_member_hours": 1,
+            "school_leader_hours": 1,
+            "school_member_hours": 1
+        }),
+    )
+    .with_cookie(&cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }

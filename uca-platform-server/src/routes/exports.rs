@@ -603,7 +603,7 @@ fn render_labor_hours_pdf(
     let mut current_page = page1;
     let mut layer = doc.get_page(page1).get_layer(layer1);
 
-    let mut y = 280.0;
+    let mut y: f32 = 280.0;
     layer.use_text(&title, 16.0, Mm(20.0), Mm(y), &font);
     y -= 14.0;
 
@@ -635,11 +635,11 @@ fn render_labor_hours_pdf(
                 let col_width = if columns.is_empty() {
                     160.0
                 } else {
-                    160.0 / columns.len() as f64
+                    160.0 / columns.len() as f32
                 };
                 ensure_page_space(&mut y, 12.0, &doc, &mut current_page, &mut layer, &font)?;
                 for (idx, col) in columns.iter().enumerate() {
-                    let x = 20.0 + (idx as f64) * col_width;
+                    let x = 20.0 + (idx as f32) * col_width;
                     layer.use_text(&col.label, 9.5, Mm(x), Mm(y), &font);
                 }
                 y -= 6.0;
@@ -655,7 +655,7 @@ fn render_labor_hours_pdf(
                     );
                     ensure_page_space(&mut y, 10.0, &doc, &mut current_page, &mut layer, &font)?;
                     for (idx, col) in columns.iter().enumerate() {
-                        let x = 20.0 + (idx as f64) * col_width;
+                        let x = 20.0 + (idx as f32) * col_width;
                         let value = resolve_record_value(
                             col,
                             record,
@@ -767,9 +767,9 @@ fn resolve_record_value(
 }
 
 fn ensure_page_space(
-    y: &mut f64,
-    needed: f64,
-    doc: &PdfDocument,
+    y: &mut f32,
+    needed: f32,
+    doc: &printpdf::PdfDocumentReference,
     current_page: &mut printpdf::PdfPageIndex,
     layer: &mut printpdf::PdfLayerReference,
     font: &printpdf::IndirectFontRef,
@@ -785,27 +785,21 @@ fn ensure_page_space(
     Ok(())
 }
 
-fn draw_horizontal_line(layer: &mut printpdf::PdfLayerReference, y: f64, x1: f64, x2: f64) {
+fn draw_horizontal_line(layer: &mut printpdf::PdfLayerReference, y: f32, x1: f32, x2: f32) {
     let line = Line {
-        points: vec![
-            (Point::new(Mm(x1), Mm(y)), false),
-            (Point::new(Mm(x2), Mm(y)), false),
-        ],
+        points: vec![(Point::new(Mm(x1), Mm(y)), false), (Point::new(Mm(x2), Mm(y)), false)],
         is_closed: false,
-        has_fill: false,
-        has_stroke: true,
-        is_clipping_path: false,
     };
-    layer.add_shape(line);
+    layer.add_line(line);
 }
 
 fn draw_signature_line(
     layer: &mut printpdf::PdfLayerReference,
-    mut y: f64,
+    mut y: f32,
     font: &printpdf::IndirectFontRef,
     label: &str,
     signature_path: Option<&str>,
-) -> f64 {
+) -> f32 {
     layer.use_text(label, 10.0, Mm(20.0), Mm(y), font);
     if let Some(path) = signature_path {
         if let Some(image) = load_signature_image(path) {
@@ -1154,5 +1148,53 @@ mod tests {
             .expect("write text");
         write_cell(worksheet, 1, 0, &ExportValue::Number(3.0))
             .expect("write number");
+    }
+
+    #[test]
+    fn resolve_info_value_maps_summary_fields() {
+        let student = build_student();
+        let field = ExportLayoutField {
+            key: "approved_hours".to_string(),
+            label: "审核学时".to_string(),
+        };
+        let value = resolve_info_value(&field, &student, 5, 3, "原因");
+        assert_eq!(value, "3");
+    }
+
+    #[test]
+    fn resolve_record_value_reads_custom_field() {
+        let record = contest_records::Model {
+            id: Uuid::new_v4(),
+            student_id: Uuid::new_v4(),
+            contest_year: Some(2024),
+            contest_category: Some("A".to_string()),
+            contest_name: "竞赛A".to_string(),
+            contest_level: Some("国家级".to_string()),
+            contest_role: Some("负责人".to_string()),
+            award_level: "一等奖".to_string(),
+            award_date: None,
+            self_hours: 3,
+            first_review_hours: Some(2),
+            final_review_hours: Some(4),
+            status: "final_reviewed".to_string(),
+            rejection_reason: None,
+            is_deleted: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let mut custom = HashMap::new();
+        custom.insert("sponsor".to_string(), "数学学院".to_string());
+        let field = ExportLayoutField {
+            key: "custom.sponsor".to_string(),
+            label: "主办方".to_string(),
+        };
+        let value = resolve_record_value(&field, &record, Some(&custom), 6);
+        assert_eq!(value, "数学学院");
+    }
+
+    #[test]
+    fn truncate_text_adds_ellipsis() {
+        let value = truncate_text("1234567890", 4);
+        assert_eq!(value, "1234…");
     }
 }

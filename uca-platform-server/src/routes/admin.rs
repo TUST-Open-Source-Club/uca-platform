@@ -57,7 +57,7 @@ pub struct CompetitionResponse {
 }
 
 /// 劳动学时规则请求。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LaborHourRuleRequest {
     pub base_hours_a: i32,
     pub base_hours_b: i32,
@@ -116,7 +116,7 @@ pub struct PasswordPolicyResponse {
 }
 
 /// 导入模板字段请求。
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct ImportTemplateFieldRequest {
     /// 字段 key。
     #[validate(length(min = 1, max = 64))]
@@ -295,10 +295,11 @@ pub async fn create_competition(
     let now = Utc::now();
     let id = Uuid::new_v4();
     let name = payload.name;
+    let category = payload.category.as_ref().map(|value| value.to_uppercase());
     let model = competition_library::ActiveModel {
         id: Set(id),
         year: Set(payload.year),
-        category: Set(payload.category.map(|value| value.to_uppercase())),
+        category: Set(category.clone()),
         name: Set(name.clone()),
         created_at: Set(now),
         updated_at: Set(now),
@@ -311,7 +312,7 @@ pub async fn create_competition(
     Ok(Json(CompetitionResponse {
         id,
         year: payload.year,
-        category: payload.category.map(|value| value.to_uppercase()),
+        category,
         name,
     }))
 }
@@ -978,18 +979,19 @@ pub async fn update_import_template(
             .map_err(|err| AppError::Database(err.to_string()))?;
         updated.id
     } else {
+        let id = Uuid::new_v4();
         let model = import_templates::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(id),
             template_key: Set(template_key.clone()),
             name: Set(payload.name.clone()),
             created_at: Set(now),
             updated_at: Set(now),
         };
         import_templates::Entity::insert(model)
-            .exec(&transaction)
+            .exec_without_returning(&transaction)
             .await
-            .map_err(|err| AppError::Database(err.to_string()))?
-            .last_insert_id
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        id
     };
 
     ImportTemplateField::delete_many()

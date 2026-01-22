@@ -136,3 +136,20 @@ Implement the core backend + frontend skeleton for the VolunteerHours system bas
 
 ## Rollback
 - Revert changed files via git.
+
+## Current Task: 账号自助凭据管理 + 校验规则提示
+1) 后端二次验证与自助修改
+- 新增 reauth 接口（password/totp/passkey），签发短效 reauth token。
+- Passkey/TOTP 绑定、设备删除等自助操作要求 reauth token；若用户无任何凭据则跳过。
+- 新增公共密码策略查询接口，供前端展示提示。
+
+2) 前端自助管理与提示
+- 设备管理页支持 reauth（密码/TOTP/Passkey），并在新增/删除凭据时携带 token。
+- 密码相关页面展示密码规则提示。
+
+## Verification
+- Backend: cargo test (或至少 cargo check)
+- Frontend: pnpm test:unit
+
+## Rollback
+- 使用 git 回退本次修改文件。

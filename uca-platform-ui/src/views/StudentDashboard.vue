@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { listCompetitionsPublic } from '../api/catalog'
 import { createContest, createVolunteer } from '../api/records'
-import { bindEmail, changePassword } from '../api/auth'
+import { bindEmail, changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
 import { useRequest } from '../composables/useRequest'
 
@@ -42,6 +42,17 @@ const accountRules = {
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
   new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }],
 }
+
+const passwordPolicy = ref<PasswordPolicy | null>(null)
+const passwordHint = computed(() => {
+  if (!passwordPolicy.value) return '密码规则加载中...'
+  const parts = [`至少 ${passwordPolicy.value.min_length} 位`]
+  if (passwordPolicy.value.require_uppercase) parts.push('包含大写字母')
+  if (passwordPolicy.value.require_lowercase) parts.push('包含小写字母')
+  if (passwordPolicy.value.require_digit) parts.push('包含数字')
+  if (passwordPolicy.value.require_symbol) parts.push('包含特殊符号')
+  return `密码规则：${parts.join('，')}`
+})
 
 const validateHours = (_: unknown, value: number, callback: (error?: Error) => void) => {
   if (Number(value) <= 0) {
@@ -112,8 +123,17 @@ const loadFields = async () => {
   })
 }
 
+const loadPasswordPolicy = async () => {
+  try {
+    passwordPolicy.value = await getPasswordPolicy()
+  } catch {
+    passwordPolicy.value = null
+  }
+}
+
 onMounted(() => {
   void loadFields()
+  void loadPasswordPolicy()
 })
 
 const handleVolunteerSubmit = async () => {
@@ -275,6 +295,13 @@ const handleChangePassword = async () => {
         <el-form-item label="新密码" prop="new_password">
           <el-input v-model="accountForm.new_password" type="password" show-password />
         </el-form-item>
+        <el-alert
+          type="info"
+          show-icon
+          :title="passwordHint"
+          :closable="false"
+          style="margin-bottom: 12px"
+        />
         <el-button type="primary" :loading="accountRequest.loading" @click="handleChangePassword">
           修改密码
         </el-button>

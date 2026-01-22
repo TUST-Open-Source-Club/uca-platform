@@ -91,6 +91,73 @@
 { "methods": ["passkey", "totp", "recovery", "password"] }
 ```
 
+### GET /auth/password-policy
+获取密码策略（用于前端提示，无需登录）。
+
+响应：
+```json
+{
+  "min_length": 8,
+  "require_uppercase": false,
+  "require_lowercase": false,
+  "require_digit": true,
+  "require_symbol": false
+}
+```
+
+### POST /auth/reauth/password
+使用当前密码进行二次验证，返回短效 reauth token（需要会话 Cookie）。
+
+请求：
+```json
+{ "current_password": "当前密码" }
+```
+
+响应：
+```json
+{ "token": "<reauth_token>", "expires_in": 300 }
+```
+
+### POST /auth/reauth/totp
+使用 TOTP 进行二次验证，返回短效 reauth token（需要会话 Cookie）。
+
+请求：
+```json
+{ "code": "123456" }
+```
+
+响应：
+```json
+{ "token": "<reauth_token>", "expires_in": 300 }
+```
+
+### POST /auth/reauth/passkey/start
+发起 Passkey 二次验证（需要会话 Cookie）。
+
+响应：
+```json
+{
+  "session_id": "<uuid>",
+  "public_key": { "publicKey": { /* WebAuthn RequestChallengeResponse */ } }
+}
+```
+
+### POST /auth/reauth/passkey/finish
+完成 Passkey 二次验证，返回短效 reauth token。
+
+请求：
+```json
+{
+  "session_id": "<uuid>",
+  "credential": { /* PublicKeyCredential */ }
+}
+```
+
+响应：
+```json
+{ "token": "<reauth_token>", "expires_in": 300 }
+```
+
 ### POST /auth/passkey/register/start
 为已有用户发起 Passkey 注册（需要会话 Cookie，且用户名必须与当前会话一致）。
 
@@ -108,7 +175,7 @@
 ```
 
 ### POST /auth/passkey/register/finish
-完成 Passkey 注册。
+完成 Passkey 注册。若用户已有任一凭据（密码/TOTP/Passkey），需携带二次验证头 `X-Reauth-Token`。
 
 请求：
 ```json
@@ -199,7 +266,7 @@
 ```
 
 ### POST /auth/totp/enroll/finish
-完成 TOTP 绑定（需要会话 Cookie）。
+完成 TOTP 绑定（需要会话 Cookie）。若用户已有任一凭据（密码/TOTP/Passkey），需携带二次验证头 `X-Reauth-Token`。
 
 请求：
 ```json
@@ -384,7 +451,7 @@
 ```
 
 ### DELETE /auth/devices/{device_id}
-移除当前用户设备。
+移除当前用户设备。若用户已有任一凭据（密码/TOTP/Passkey），需携带二次验证头 `X-Reauth-Token`。
 
 响应：
 ```json

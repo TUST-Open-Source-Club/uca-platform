@@ -11,13 +11,34 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(Users::Table)
                     .add_column(ColumnDef::new(Users::Email).string().null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .add_column(ColumnDef::new(Users::PasswordHash).string().null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .add_column(
                         ColumnDef::new(Users::AllowPasswordLogin)
                             .boolean()
                             .not_null()
                             .default(false),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .add_column(ColumnDef::new(Users::PasswordUpdatedAt).timestamp_with_time_zone().null())
                     .to_owned(),
             )
@@ -97,8 +118,29 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(Users::Table)
                     .drop_column(Users::PasswordUpdatedAt)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .drop_column(Users::AllowPasswordLogin)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .drop_column(Users::PasswordHash)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
                     .drop_column(Users::Email)
                     .to_owned(),
             )

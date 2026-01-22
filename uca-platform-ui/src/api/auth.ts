@@ -12,6 +12,21 @@ export type CurrentUser = {
   role: 'student' | 'reviewer' | 'teacher' | 'admin'
 }
 
+export type PasswordPolicy = {
+  min_length: number
+  require_uppercase: boolean
+  require_lowercase: boolean
+  require_digit: boolean
+  require_symbol: boolean
+}
+
+export type ReauthTokenResponse = {
+  token: string
+  expires_in: number
+}
+
+const reauthHeaders = (token?: string) => (token ? { 'X-Reauth-Token': token } : undefined)
+
 export async function passkeyStart(username: string): Promise<PasskeyStartResponse> {
   return requestJson('/auth/passkey/login/start', {
     method: 'POST',
@@ -29,9 +44,11 @@ export async function passkeyRegisterStart(username: string): Promise<PasskeySta
 export async function passkeyRegisterFinish(
   session_id: string,
   credential: Record<string, unknown>,
+  reauthToken?: string,
 ): Promise<{ passkey_id: string }> {
   return requestJson('/auth/passkey/register/finish', {
     method: 'POST',
+    headers: reauthHeaders(reauthToken),
     body: JSON.stringify({ session_id, credential }),
   })
 }
@@ -76,8 +93,19 @@ export async function listDevices(): Promise<unknown[]> {
   return requestJson('/auth/devices', { method: 'GET' })
 }
 
+export async function deleteDevice(device_id: string, reauthToken?: string): Promise<{ status: string }> {
+  return requestJson(`/auth/devices/${device_id}`, {
+    method: 'DELETE',
+    headers: reauthHeaders(reauthToken),
+  })
+}
+
 export async function getCurrentUser(): Promise<CurrentUser> {
   return requestJson('/auth/me', { method: 'GET' })
+}
+
+export async function getPasswordPolicy(): Promise<PasswordPolicy> {
+  return requestJson('/auth/password-policy', { method: 'GET' })
 }
 
 export async function regenerateRecoveryCodes(): Promise<{ codes: string[] }> {
@@ -113,6 +141,34 @@ export async function changePassword(payload: {
   return requestJson('/auth/password/change', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function reauthPassword(current_password: string): Promise<ReauthTokenResponse> {
+  return requestJson('/auth/reauth/password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password }),
+  })
+}
+
+export async function reauthTotp(code: string): Promise<ReauthTokenResponse> {
+  return requestJson('/auth/reauth/totp', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export async function reauthPasskeyStart(): Promise<PasskeyStartResponse> {
+  return requestJson('/auth/reauth/passkey/start', { method: 'POST' })
+}
+
+export async function reauthPasskeyFinish(
+  session_id: string,
+  credential: Record<string, unknown>,
+): Promise<ReauthTokenResponse> {
+  return requestJson('/auth/reauth/passkey/finish', {
+    method: 'POST',
+    body: JSON.stringify({ session_id, credential }),
   })
 }
 
@@ -163,21 +219,29 @@ export async function resetConsume(token: string): Promise<{ user_id: string; pu
   })
 }
 
-export async function totpEnrollStart(payload?: {
-  device_label?: string
-}): Promise<{ enrollment_id: string; otpauth_url: string }> {
+export async function totpEnrollStart(
+  payload?: {
+    device_label?: string
+  },
+  reauthToken?: string,
+): Promise<{ enrollment_id: string; otpauth_url: string }> {
   return requestJson('/auth/totp/enroll/start', {
     method: 'POST',
+    headers: reauthHeaders(reauthToken),
     body: JSON.stringify(payload ?? {}),
   })
 }
 
-export async function totpEnrollFinish(payload: {
-  enrollment_id: string
-  code: string
-}): Promise<{ status: string }> {
+export async function totpEnrollFinish(
+  payload: {
+    enrollment_id: string
+    code: string
+  },
+  reauthToken?: string,
+): Promise<{ status: string }> {
   return requestJson('/auth/totp/enroll/finish', {
     method: 'POST',
+    headers: reauthHeaders(reauthToken),
     body: JSON.stringify(payload),
   })
 }

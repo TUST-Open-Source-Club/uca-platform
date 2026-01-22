@@ -8,10 +8,21 @@ export type ApiError = {
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const data = (await response.json()) as T | ApiError
+  const text = await response.text()
+  let data: T | ApiError | null = null
+  if (text) {
+    try {
+      data = JSON.parse(text) as T | ApiError
+    } catch {
+      if (!response.ok) {
+        throw new Error(text || '请求失败')
+      }
+      throw new Error('响应不是有效的 JSON')
+    }
+  }
   if (!response.ok) {
-    const err = data as ApiError
-    throw new Error(err.message || '请求失败')
+    const err = data as ApiError | null
+    throw new Error(err?.message || response.statusText || '请求失败')
   }
   return data as T
 }

@@ -1,7 +1,9 @@
 //! 认证处理器（Passkey、TOTP、恢复码）。
 
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
+    http::HeaderMap,
     response::IntoResponse,
     Json,
 };
@@ -13,7 +15,10 @@ use serde::{Deserialize, Serialize};
 use chrono::{Duration as ChronoDuration, Utc};
 use time::{Duration as TimeDuration, OffsetDateTime};
 use uuid::Uuid;
-use webauthn_rs::prelude::{CreationChallengeResponse, PublicKeyCredential, RegisterPublicKeyCredential};
+use webauthn_rs::prelude::{
+    CreationChallengeResponse, PublicKeyCredential, RegisterPublicKeyCredential,
+    RequestChallengeResponse,
+};
 
 use crate::{
     auth::{
@@ -28,10 +33,11 @@ use crate::{
     error::AppError,
     mailer::send_mail,
     policy::load_password_policy,
-    state::{AppState, PasskeyAuthSession, PasskeyRegisterSession},
+    state::{AppState, PasskeyAuthSession, PasskeyRegisterSession, ReauthSession},
 };
 
 const PASSWORD_RESET_TTL_MINUTES: i64 = 30;
+const REAUTH_TTL_SECONDS: i64 = 300;
 
 /// 基础健康检查响应。
 #[derive(Debug, Serialize)]
@@ -115,6 +121,21 @@ pub struct LoginOptionsResponse {
     pub methods: Vec<String>,
 }
 
+/// 密码策略响应。
+#[derive(Debug, Serialize)]
+pub struct PasswordPolicyResponse {
+    /// 最小长度。
+    pub min_length: usize,
+    /// 是否要求大写字母。
+    pub require_uppercase: bool,
+    /// 是否要求小写字母。
+    pub require_lowercase: bool,
+    /// 是否要求数字。
+    pub require_digit: bool,
+    /// 是否要求特殊符号。
+    pub require_symbol: bool,
+}
+
 /// 密码登录请求。
 #[derive(Debug, Deserialize)]
 pub struct PasswordLoginRequest {
@@ -138,6 +159,38 @@ pub struct PasswordChangeRequest {
     pub current_password: String,
     /// 新密码。
     pub new_password: String,
+}
+
+/// 密码二次验证请求。
+#[derive(Debug, Deserialize)]
+pub struct ReauthPasswordRequest {
+    /// 当前密码。
+    pub current_password: String,
+}
+
+/// TOTP 二次验证请求。
+#[derive(Debug, Deserialize)]
+pub struct ReauthTotpRequest {
+    /// TOTP 验证码。
+    pub code: String,
+}
+
+/// Passkey 二次验证开始响应。
+#[derive(Debug, Serialize)]
+pub struct ReauthPasskeyStartResponse {
+    /// 服务端会话 ID。
+    pub session_id: Uuid,
+    /// Passkey 挑战。
+    pub public_key: RequestChallengeResponse,
+}
+
+/// 二次验证令牌响应。
+#[derive(Debug, Serialize)]
+pub struct ReauthTokenResponse {
+    /// 二次验证令牌。
+    pub token: String,
+    /// 令牌有效期（秒）。
+    pub expires_in: i64,
 }
 
 /// 发起密码重置请求。
@@ -238,6 +291,20 @@ pub async fn bootstrap_status(
     }))
 }
 
+/// 获取密码策略（用于前端提示）。
+pub async fn password_policy(
+    State(state): State<AppState>,
+) -> Result<Json<PasswordPolicyResponse>, AppError> {
+    let policy = load_password_policy(&state).await?;
+    Ok(Json(PasswordPolicyResponse {
+        min_length: policy.min_length,
+        require_uppercase: policy.require_uppercase,
+        require_lowercase: policy.require_lowercase,
+        require_digit: policy.require_digit,
+        require_symbol: policy.require_symbol,
+    }))
+}
+
 /// 获取用户允许的登录方式。
 pub async fn login_options(
     State(state): State<AppState>,
@@ -256,6 +323,155 @@ pub async fn login_options(
     }
 
     Ok(Json(LoginOptionsResponse { methods }))
+}
+
+/// 使用密码进行二次验证。
+pub async fn reauth_password(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<ReauthPasswordRequest>,
+) -> Result<Json<ReauthTokenResponse>, AppError> {
+    let user = require_session(&state, &jar).await?;
+    if !user.allow_password_login {
+        return Err(AppError::auth("password login not allowed"));
+    }
+    let hash = user
+        .password_hash
+        .as_ref()
+        .ok_or_else(|| AppError::auth("password not set"))?;
+    if !verify_password(&payload.current_password, hash)? {
+        return Err(AppError::auth("invalid password"));
+    }
+    issue_reauth_token(&state, user.id).await
+}
+
+/// 使用 TOTP 进行二次验证。
+pub async fn reauth_totp(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<ReauthTotpRequest>,
+) -> Result<Json<ReauthTokenResponse>, AppError> {
+    let user = require_session(&state, &jar).await?;
+
+    let secret = TotpSecret::find()
+        .filter(totp_secrets::Column::UserId.eq(user.id))
+        .filter(totp_secrets::Column::Enabled.eq(true))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::bad_request("no TOTP enrolled"))?;
+
+    let raw = decrypt_secret(&secret.secret_enc, &state.config.auth_secret_key)?;
+    if !verify_totp(&raw, &payload.code)? {
+        return Err(AppError::auth("invalid TOTP"));
+    }
+
+    issue_reauth_token(&state, user.id).await
+}
+
+/// 开始 Passkey 二次验证。
+pub async fn reauth_passkey_start(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<ReauthPasskeyStartResponse>, AppError> {
+    let user = require_session(&state, &jar).await?;
+
+    let passkey_records = Passkey::find()
+        .filter(passkeys::Column::UserId.eq(user.id))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if passkey_records.is_empty() {
+        return Err(AppError::bad_request("no passkeys registered"));
+    }
+
+    let passkeys = passkey_records
+        .iter()
+        .map(|record| serde_json::from_str(&record.passkey_json))
+        .collect::<Result<Vec<webauthn_rs::prelude::Passkey>, _>>()
+        .map_err(|_| AppError::internal("failed to parse passkey"))?;
+
+    let (challenge, auth_state) = state
+        .webauthn
+        .start_passkey_authentication(&passkeys)
+        .map_err(|err| AppError::internal(&format!("passkey reauth start failed: {err}")))?;
+
+    let session_id = Uuid::new_v4();
+    let session = PasskeyAuthSession {
+        user_id: user.id,
+        state: auth_state,
+        created_at: OffsetDateTime::now_utc(),
+    };
+    state
+        .reauth_passkey_state
+        .lock()
+        .await
+        .insert(session_id, session);
+
+    Ok(Json(ReauthPasskeyStartResponse {
+        session_id,
+        public_key: challenge,
+    }))
+}
+
+/// 完成 Passkey 二次验证。
+pub async fn reauth_passkey_finish(
+    State(state): State<AppState>,
+    Json(payload): Json<PasskeyLoginFinishRequest>,
+) -> Result<Json<ReauthTokenResponse>, AppError> {
+    let session = state
+        .reauth_passkey_state
+        .lock()
+        .await
+        .take(&payload.session_id)
+        .ok_or_else(|| AppError::bad_request("invalid or expired session"))?;
+
+    let auth_result = state
+        .webauthn
+        .finish_passkey_authentication(&payload.credential, &session.state)
+        .map_err(|err| AppError::auth(&format!("passkey reauth failed: {err}")))?;
+
+    let cred_id_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(auth_result.cred_id().as_ref());
+
+    let record = Passkey::find()
+        .filter(passkeys::Column::CredentialId.eq(&cred_id_b64))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::auth("credential not found"))?;
+
+    let mut stored_passkey: webauthn_rs::prelude::Passkey =
+        serde_json::from_str(&record.passkey_json)
+            .map_err(|_| AppError::internal("failed to parse passkey"))?;
+    if stored_passkey.update_credential(&auth_result).unwrap_or(false) {
+        let updated_json = serde_json::to_string(&stored_passkey)
+            .map_err(|_| AppError::internal("failed to serialize passkey"))?;
+        let mut active: passkeys::ActiveModel = record.into();
+        active.passkey_json = Set(updated_json);
+        active.last_used_at = Set(Some(Utc::now()));
+        active
+            .update(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    if let Some(existing) = Device::find()
+        .filter(devices::Column::UserId.eq(session.user_id))
+        .filter(devices::Column::CredentialId.eq(Some(cred_id_b64)))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+    {
+        let mut active: devices::ActiveModel = existing.into();
+        active.last_used_at = Set(Some(Utc::now()));
+        active
+            .update(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
+    issue_reauth_token(&state, session.user_id).await
 }
 
 /// 创建初始管理员用户（仅在无用户时允许）。
@@ -394,6 +610,7 @@ pub struct PasskeyRegisterFinishResponse {
 /// 完成 Passkey 注册并保存凭据。
 pub async fn passkey_register_finish(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<PasskeyRegisterFinishRequest>,
 ) -> Result<Json<PasskeyRegisterFinishResponse>, AppError> {
     let session = state
@@ -402,6 +619,8 @@ pub async fn passkey_register_finish(
         .await
         .take_register(&payload.session_id)
         .ok_or_else(|| AppError::bad_request("invalid or expired session"))?;
+
+    require_reauth(&state, &headers, session.user_id).await?;
 
     let passkey = state
         .webauthn
@@ -681,9 +900,15 @@ pub struct TotpEnrollStartResponse {
 pub async fn totp_enroll_start(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(payload): Json<TotpEnrollStartRequest>,
+    body: Bytes,
 ) -> Result<Json<TotpEnrollStartResponse>, AppError> {
     let user = require_session(&state, &jar).await?;
+    let payload = if body.is_empty() {
+        TotpEnrollStartRequest { device_label: None }
+    } else {
+        serde_json::from_slice::<TotpEnrollStartRequest>(&body)
+            .map_err(|_| AppError::bad_request("invalid json payload"))?
+    };
 
     let (secret, url) = generate_totp("UCA Platform", &user.username)?;
     let encrypted = encrypt_secret(&secret, &state.config.auth_secret_key)?;
@@ -739,9 +964,17 @@ pub struct TotpEnrollFinishRequest {
 pub async fn totp_enroll_finish(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(payload): Json<TotpEnrollFinishRequest>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user = require_session(&state, &jar).await?;
+    require_reauth(&state, &headers, user.id).await?;
+    let payload = if body.is_empty() {
+        return Err(AppError::bad_request("missing json payload"));
+    } else {
+        serde_json::from_slice::<TotpEnrollFinishRequest>(&body)
+            .map_err(|_| AppError::bad_request("invalid json payload"))?
+    };
 
     let record = TotpSecret::find_by_id(payload.enrollment_id)
         .one(&state.db)
@@ -1276,9 +1509,37 @@ pub async fn list_devices(
 pub async fn delete_device(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Path(device_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user = require_session(&state, &jar).await?;
+    require_reauth(&state, &headers, user.id).await?;
+
+    let device = Device::find()
+        .filter(devices::Column::UserId.eq(user.id))
+        .filter(devices::Column::Id.eq(device_id))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("device not found"))?;
+
+    if device.device_type == "passkey" {
+        if let Some(cred) = device.credential_id.clone() {
+            passkeys::Entity::delete_many()
+                .filter(passkeys::Column::UserId.eq(user.id))
+                .filter(passkeys::Column::CredentialId.eq(cred))
+                .exec(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
+        }
+    } else if device.device_type == "totp" {
+        totp_secrets::Entity::delete_many()
+            .filter(totp_secrets::Column::UserId.eq(user.id))
+            .exec(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+    }
+
     Device::delete_many()
         .filter(devices::Column::UserId.eq(user.id))
         .filter(devices::Column::Id.eq(device_id))
@@ -1286,6 +1547,82 @@ pub async fn delete_device(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
     Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+async fn issue_reauth_token(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<Json<ReauthTokenResponse>, AppError> {
+    let token = generate_token();
+    let session = ReauthSession {
+        user_id,
+        created_at: OffsetDateTime::now_utc(),
+    };
+    state
+        .reauth_state
+        .lock()
+        .await
+        .insert(token.clone(), session);
+    Ok(Json(ReauthTokenResponse {
+        token,
+        expires_in: REAUTH_TTL_SECONDS,
+    }))
+}
+
+async fn require_reauth(
+    state: &AppState,
+    headers: &HeaderMap,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if !needs_reauth(state, user_id).await? {
+        return Ok(());
+    }
+
+    let token = headers
+        .get("x-reauth-token")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| AppError::auth("reauth required"))?;
+
+    let session = state
+        .reauth_state
+        .lock()
+        .await
+        .take(token)
+        .ok_or_else(|| AppError::auth("invalid reauth token"))?;
+    if session.user_id != user_id {
+        return Err(AppError::auth("invalid reauth token"));
+    }
+
+    Ok(())
+}
+
+async fn needs_reauth(state: &AppState, user_id: Uuid) -> Result<bool, AppError> {
+    let user = User::find_by_id(user_id)
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+
+    if user.allow_password_login && user.password_hash.is_some() {
+        return Ok(true);
+    }
+
+    let passkey_count = Passkey::find()
+        .filter(passkeys::Column::UserId.eq(user_id))
+        .count(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if passkey_count > 0 {
+        return Ok(true);
+    }
+
+    let totp_count = TotpSecret::find()
+        .filter(totp_secrets::Column::UserId.eq(user_id))
+        .filter(totp_secrets::Column::Enabled.eq(true))
+        .count(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Ok(totp_count > 0)
 }
 
 fn validate_password_policy(

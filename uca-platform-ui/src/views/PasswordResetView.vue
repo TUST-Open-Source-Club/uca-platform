@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { passwordResetConfirm } from '../api/auth'
+import { getPasswordPolicy, passwordResetConfirm, type PasswordPolicy } from '../api/auth'
 import { useRequest } from '../composables/useRequest'
 
 const route = useRoute()
@@ -14,6 +14,17 @@ const token = computed(() => (route.query.token as string | undefined) ?? '')
 const form = reactive({
   new_password: '',
   confirm_password: '',
+})
+
+const passwordPolicy = ref<PasswordPolicy | null>(null)
+const passwordHint = computed(() => {
+  if (!passwordPolicy.value) return '密码规则加载中...'
+  const parts = [`至少 ${passwordPolicy.value.min_length} 位`]
+  if (passwordPolicy.value.require_uppercase) parts.push('包含大写字母')
+  if (passwordPolicy.value.require_lowercase) parts.push('包含小写字母')
+  if (passwordPolicy.value.require_digit) parts.push('包含数字')
+  if (passwordPolicy.value.require_symbol) parts.push('包含特殊符号')
+  return `密码规则：${parts.join('，')}`
 })
 
 const rules = {
@@ -50,6 +61,14 @@ const handleSubmit = async () => {
     }, { successMessage: '密码已重置，请登录' })
   })
 }
+
+onMounted(async () => {
+  try {
+    passwordPolicy.value = await getPasswordPolicy()
+  } catch {
+    passwordPolicy.value = null
+  }
+})
 </script>
 
 <template>
@@ -66,6 +85,13 @@ const handleSubmit = async () => {
       <el-form-item label="确认密码" prop="confirm_password">
         <el-input v-model="form.confirm_password" type="password" show-password />
       </el-form-item>
+      <el-alert
+        type="info"
+        show-icon
+        :title="passwordHint"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
       <el-button type="primary" :loading="request.loading" @click="handleSubmit">
         提交
       </el-button>

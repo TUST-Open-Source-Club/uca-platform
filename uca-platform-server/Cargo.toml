@@ -22,6 +22,7 @@ printpdf = { version = "0.7", features = ["embedded_images"] }
 rand = "0.8"
 rcgen = "0.13"
 rust_xlsxwriter = "0.65"
+umya-spreadsheet = "1.1"
 sea-orm = { version = "1", features = ["sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 sea-orm-migration = "1"
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +33,7 @@ time = { version = "0.3", features = ["serde", "macros"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+tempfile = "3"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 tracing = "0.1"
@@ -43,4 +45,3 @@ webauthn-rs = "0.5"
 
 [dev-dependencies]
 hyper = "1"
-tempfile = "3"

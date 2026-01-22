@@ -46,6 +46,7 @@ async fn setup_context() -> TestContext {
         tls_import_key_path: None,
         tls_key_enc_key: vec![0u8; 32],
         upload_dir: "data/uploads".into(),
+        libreoffice_path: "internal".to_string(),
         session_cookie_name: "vh_session".to_string(),
         session_ttl_seconds: 3600,
         auth_secret_key: vec![1u8; 32],
@@ -303,6 +304,15 @@ fn build_xlsx(headers: &[&str], rows: &[Vec<&str>]) -> Vec<u8> {
     workbook.save_to_buffer().unwrap()
 }
 
+fn build_export_template_xlsx() -> Vec<u8> {
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_string(0, 0, "{{student_no}}").unwrap();
+    worksheet.write_string(2, 0, "{{list:contest_name}}").unwrap();
+    worksheet.write_string(3, 0, "{{/list}}").unwrap();
+    workbook.save_to_buffer().unwrap()
+}
+
 #[tokio::test]
 async fn health_and_bootstrap() {
     let ctx = setup_context().await;
@@ -387,36 +397,6 @@ async fn admin_templates_and_rules() {
 
     let request = Request::builder()
         .method("GET")
-        .uri("/admin/import-templates")
-        .header(header::COOKIE, cookie.clone())
-        .body(Body::empty())
-        .unwrap();
-    let response = ctx.app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let templates: Vec<serde_json::Value> = response_json(response).await;
-    assert!(!templates.is_empty());
-
-    let request = json_request(
-        "POST",
-        "/admin/import-templates/contest_records",
-        json!({
-            "name": "学生获奖情况清单",
-            "fields": [
-                { "field_key": "student_no", "label": "学号", "column_title": "学号", "required": true, "order_index": 1 },
-                { "field_key": "contest_name", "label": "竞赛名称", "column_title": "竞赛名称", "required": true, "order_index": 2 },
-                { "field_key": "contest_level", "label": "竞赛级别", "column_title": "竞赛级别", "required": true, "order_index": 3 },
-                { "field_key": "contest_role", "label": "角色", "column_title": "角色", "required": true, "order_index": 4 },
-                { "field_key": "award_level", "label": "获奖等级", "column_title": "获奖等级", "required": true, "order_index": 5 },
-                { "field_key": "self_hours", "label": "自评学时", "column_title": "自评学时", "required": true, "order_index": 6 }
-            ]
-        }),
-    )
-    .with_cookie(&cookie);
-    let response = ctx.app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let request = Request::builder()
-        .method("GET")
         .uri("/admin/export-templates/labor_hours")
         .header(header::COOKIE, cookie.clone())
         .body(Body::empty())
@@ -424,19 +404,11 @@ async fn admin_templates_and_rules() {
     let response = ctx.app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let request = json_request(
-        "POST",
-        "/admin/export-templates/labor_hours",
-        json!({
-            "name": "劳动教育学时认定表",
-            "layout": {
-                "title": "劳动教育学时认定表",
-                "sections": [
-                    { "type": "info", "title": "学生信息", "fields": [{ "key": "student_no", "label": "学号" }] }
-                ],
-                "signature": { "first_label": "初审教师签名", "final_label": "复审教师签名" }
-            }
-        }),
+    let template_xlsx = build_export_template_xlsx();
+    let request = multipart_request(
+        "/admin/export-templates/labor_hours/upload",
+        "labor-hours.xlsx",
+        template_xlsx,
     )
     .with_cookie(&cookie);
     let response = ctx.app.clone().oneshot(request).await.unwrap();

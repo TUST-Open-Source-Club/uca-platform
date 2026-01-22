@@ -43,6 +43,9 @@ export async function deleteCompetition(competitionId: string): Promise<{ status
 export type CompetitionSheetPlan = {
   name: string
   year?: number | null
+  name_column?: string
+  category_column?: string
+  category_suffix?: 'none' | 'class' | 'class_contest'
 }
 
 export async function importCompetitions(
@@ -72,9 +75,15 @@ export async function createFormField(payload: Record<string, unknown>): Promise
   })
 }
 
-export async function importContestRecords(file: File): Promise<unknown> {
+export async function importContestRecords(
+  file: File,
+  fieldMap?: Record<string, string>,
+): Promise<unknown> {
   const form = new FormData()
   form.append('file', file)
+  if (fieldMap && Object.keys(fieldMap).length) {
+    form.append('field_map', JSON.stringify(fieldMap))
+  }
   return requestMultipart('/admin/records/contest/import', form)
 }
 
@@ -165,53 +174,23 @@ export async function updateLaborHourRules(payload: LaborHourRule): Promise<Labo
   })
 }
 
-export type ImportTemplateField = {
-  field_key: string
-  label: string
-  column_title: string
-  required: boolean
-  order_index: number
-  description?: string | null
-}
-
-export type ImportTemplate = {
+export type ExportTemplateFile = {
   template_key: string
   name: string
-  fields: ImportTemplateField[]
+  issues: string[]
 }
 
-export async function listImportTemplates(): Promise<ImportTemplate[]> {
-  return requestJson('/admin/import-templates', { method: 'GET' })
-}
-
-export async function updateImportTemplate(
-  templateKey: string,
-  payload: { name: string; fields: ImportTemplateField[] },
-): Promise<ImportTemplate> {
-  return requestJson(`/admin/import-templates/${encodeURIComponent(templateKey)}`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-export type ExportTemplate = {
-  template_key: string
-  name: string
-  layout: Record<string, unknown>
-}
-
-export async function getExportTemplate(templateKey: string): Promise<ExportTemplate> {
+export async function getExportTemplateFile(templateKey: string): Promise<ExportTemplateFile> {
   return requestJson(`/admin/export-templates/${encodeURIComponent(templateKey)}`, { method: 'GET' })
 }
 
-export async function updateExportTemplate(
+export async function uploadExportTemplateFile(
   templateKey: string,
-  payload: { name: string; layout: Record<string, unknown> },
-): Promise<ExportTemplate> {
-  return requestJson(`/admin/export-templates/${encodeURIComponent(templateKey)}`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  file: File,
+): Promise<ExportTemplateFile> {
+  const form = new FormData()
+  form.append('file', file)
+  return requestMultipart(`/admin/export-templates/${encodeURIComponent(templateKey)}/upload`, form)
 }
 
 export async function resetUserTotp(username: string): Promise<{ status: string }> {

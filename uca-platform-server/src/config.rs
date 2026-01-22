@@ -38,6 +38,8 @@ pub struct Config {
     pub tls_key_enc_key: Vec<u8>,
     /// 附件与签名的基础目录。
     pub upload_dir: PathBuf,
+    /// LibreOffice 可执行文件路径。
+    pub libreoffice_path: String,
     /// 会话 Cookie 名称。
     pub session_cookie_name: String,
     /// 会话有效期（秒）。
@@ -128,6 +130,7 @@ struct ConfigFile {
     tls_import_cert_path: Option<PathBuf>,
     tls_import_key_path: Option<PathBuf>,
     upload_dir: Option<PathBuf>,
+    libreoffice_path: Option<String>,
     session_cookie_name: Option<String>,
     session_ttl_seconds: Option<i64>,
     mail: Option<MailConfig>,
@@ -244,6 +247,10 @@ impl Config {
             .or_else(|| file_ref.and_then(|cfg| cfg.upload_dir.clone()).map(|path| path.to_string_lossy().to_string()))
             .unwrap_or_else(|| "data/uploads".to_string())
             .into();
+        let libreoffice_path = env::var("LIBREOFFICE_PATH")
+            .ok()
+            .or_else(|| file_ref.and_then(|cfg| cfg.libreoffice_path.clone()))
+            .unwrap_or_else(|| "soffice".to_string());
         let session_cookie_name = env::var("SESSION_COOKIE_NAME")
             .ok()
             .or_else(|| file_ref.and_then(|cfg| cfg.session_cookie_name.clone()))
@@ -295,6 +302,7 @@ impl Config {
             tls_import_key_path,
             tls_key_enc_key,
             upload_dir,
+            libreoffice_path,
             session_cookie_name,
             session_ttl_seconds,
             auth_secret_key,

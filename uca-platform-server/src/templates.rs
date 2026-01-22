@@ -36,7 +36,7 @@ pub struct ImportTemplateConfig {
 pub struct ExportTemplateConfig {
     pub template_key: String,
     pub name: String,
-    pub layout: Value,
+    pub issues: Vec<String>,
 }
 
 /// 读取导入模板配置（不存在时返回默认模板）。
@@ -88,28 +88,28 @@ pub async fn load_export_template(
         .await
         .map_err(|err| AppError::Database(err.to_string()))?
     {
-        let layout: Value = serde_json::from_str(&template.layout_json)
-            .map_err(|_| AppError::internal("invalid export template"))?;
+        let issues = parse_export_template_issues(&template.layout_json);
         return Ok(ExportTemplateConfig {
             template_key: template.template_key,
             name: template.name,
-            layout,
+            issues,
         });
     }
 
     Ok(default_export_template(template_key))
 }
 
-/// 新增或更新导出模板配置。
-pub async fn upsert_export_template(
+/// 新增或更新导出模板配置（保存校验问题）。
+pub async fn upsert_export_template_meta(
     state: &AppState,
     template_key: &str,
     name: String,
-    layout: Value,
+    issues: Vec<String>,
 ) -> Result<ExportTemplateConfig, AppError> {
     let now = chrono::Utc::now();
-    let layout_json = serde_json::to_string(&layout)
-        .map_err(|_| AppError::bad_request("invalid layout json"))?;
+    let layout_json = serde_json::to_string(&serde_json::json!({ "issues": issues }))
+        .map_err(|_| AppError::bad_request("invalid export template meta"))?;
+    let parsed_issues = parse_export_template_issues(&layout_json);
 
     if let Some(existing) = ExportTemplate::find()
         .filter(export_templates::Column::TemplateKey.eq(template_key))
@@ -119,7 +119,7 @@ pub async fn upsert_export_template(
     {
         let mut active: export_templates::ActiveModel = existing.into();
         active.name = Set(name.clone());
-        active.layout_json = Set(layout_json);
+        active.layout_json = Set(layout_json.clone());
         active.updated_at = Set(now);
         active
             .update(&state.db)
@@ -143,7 +143,7 @@ pub async fn upsert_export_template(
     Ok(ExportTemplateConfig {
         template_key: template_key.to_string(),
         name,
-        layout,
+        issues: parsed_issues,
     })
 }
 
@@ -358,49 +358,37 @@ fn default_import_template(template_key: &str) -> ImportTemplateConfig {
 }
 
 fn default_export_template(template_key: &str) -> ExportTemplateConfig {
-    let layout = match template_key {
-        "labor_hours" => serde_json::json!({
-            "title": "劳动教育学时认定表",
-            "sections": [
-                {
-                    "type": "info",
-                    "title": "学生信息",
-                    "fields": [
-                        { "key": "student_no", "label": "学号" },
-                        { "key": "name", "label": "姓名" },
-                        { "key": "department", "label": "院系" },
-                        { "key": "major", "label": "专业" },
-                        { "key": "class_name", "label": "班级" }
-                    ]
-                },
-                {
-                    "type": "table",
-                    "title": "竞赛获奖明细",
-                    "columns": [
-                        { "key": "contest_year", "label": "年份" },
-                        { "key": "contest_category", "label": "竞赛类型" },
-                        { "key": "contest_name", "label": "竞赛名称" },
-                        { "key": "contest_level", "label": "竞赛级别" },
-                        { "key": "contest_role", "label": "角色" },
-                        { "key": "award_level", "label": "获奖等级" },
-                        { "key": "self_hours", "label": "自评学时" },
-                        { "key": "approved_hours", "label": "审核学时" }
-                    ]
-                }
-            ],
-            "signature": {
-                "first_label": "初审教师签名",
-                "final_label": "复审教师签名"
-            }
-        }),
-        _ => serde_json::json!({ "title": "导出模板", "sections": [] }),
-    };
-
     ExportTemplateConfig {
         template_key: template_key.to_string(),
-        name: "劳动教育学时认定表".to_string(),
-        layout,
+        name: String::new(),
+        issues: Vec::new(),
     }
+}
+
+fn parse_export_template_issues(layout_json: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<Value>(layout_json) else {
+        return Vec::new();
+    };
+    value
+        .get("issues")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|text| text.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 导出模板文件路径。
+pub fn export_template_file_path(state: &AppState, template_key: &str) -> std::path::PathBuf {
+    state
+        .config
+        .upload_dir
+        .join("templates")
+        .join("export")
+        .join(format!("{template_key}.xlsx"))
 }
 
 #[cfg(test)]

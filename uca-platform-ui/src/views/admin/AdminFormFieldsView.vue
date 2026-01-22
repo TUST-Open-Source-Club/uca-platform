@@ -1,30 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import type { UploadFile } from 'element-plus'
 import {
   createFormField,
-  getExportTemplate,
+  getExportTemplateFile,
   getLaborHourRules,
   listFormFields,
-  listImportTemplates,
-  updateExportTemplate,
-  updateImportTemplate,
   updateLaborHourRules,
-  type ExportTemplate,
-  type ImportTemplate,
-  type ImportTemplateField,
+  uploadExportTemplateFile,
   type LaborHourRule,
 } from '../../api/admin'
 import { useRequest } from '../../composables/useRequest'
-
-type LayoutField = { key: string; label: string }
-type LayoutSection =
-  | { type: 'info'; title: string; fields: LayoutField[] }
-  | { type: 'table'; title: string; columns: LayoutField[] }
-type ExportLayout = {
-  title: string
-  sections: LayoutSection[]
-  signature?: { first_label?: string; final_label?: string }
-}
 
 const activeTab = ref('fields')
 
@@ -51,24 +37,11 @@ const formFieldRules = {
   order_index: [{ required: true, message: '请输入排序序号', trigger: 'change' }],
 }
 
-const importTemplates = ref<ImportTemplate[]>([])
-const selectedImportKey = ref('competition_library')
-const importRequest = useRequest()
-const importSaveRequest = useRequest()
-const importEdit = reactive<{ name: string; fields: ImportTemplateField[] }>({
-  name: '',
-  fields: [],
-})
-
+const exportTemplateFile = ref<File | null>(null)
+const exportTemplateName = ref('')
+const exportIssues = ref<string[]>([])
 const exportRequest = useRequest()
-const exportSaveRequest = useRequest()
-const exportTemplate = ref<ExportTemplate | null>(null)
-const exportTemplateName = ref('劳动教育学时认定表')
-const exportLayout = reactive<ExportLayout>({
-  title: '',
-  sections: [],
-  signature: { first_label: '初审教师签名', final_label: '复审教师签名' },
-})
+const exportUploadRequest = useRequest()
 
 const laborRules = reactive<LaborHourRule>({
   base_hours_a: 2,
@@ -82,38 +55,6 @@ const laborRules = reactive<LaborHourRule>({
 })
 const laborRequest = useRequest()
 const laborSaveRequest = useRequest()
-
-const importOptions = computed(() =>
-  importTemplates.value.map((item) => ({
-    label: item.name,
-    value: item.template_key,
-  })),
-)
-
-const templateKeysHint = [
-  'student_no',
-  'name',
-  'gender',
-  'department',
-  'major',
-  'class_name',
-  'phone',
-  'contest_year',
-  'contest_category',
-  'contest_name',
-  'contest_level',
-  'contest_role',
-  'award_level',
-  'award_date',
-  'self_hours',
-  'first_review_hours',
-  'final_review_hours',
-  'approved_hours',
-  'status',
-  'rejection_reason',
-  'recommended_hours',
-  'custom.{字段Key}',
-]
 
 const loadFormFields = async () => {
   await listRequest.run(async () => {
@@ -137,102 +78,31 @@ const handleFormFieldCreate = async () => {
   })
 }
 
-const loadImportTemplates = async () => {
-  await importRequest.run(async () => {
-    importTemplates.value = await listImportTemplates()
+const loadExportTemplate = async () => {
+  await exportRequest.run(async () => {
+    const data = await getExportTemplateFile('labor_hours')
+    exportTemplateName.value = data.name || ''
+    exportIssues.value = data.issues ?? []
   })
 }
 
-const applySelectedImport = () => {
-  const template = importTemplates.value.find((item) => item.template_key === selectedImportKey.value)
-  if (!template) return
-  importEdit.name = template.name
-  importEdit.fields = template.fields.map((field) => ({ ...field }))
+const handleExportFileChange = (file: UploadFile) => {
+  exportTemplateFile.value = file.raw ?? null
 }
 
-const handleSaveImportTemplate = async () => {
-  await importSaveRequest.run(
+const handleExportUpload = async () => {
+  if (!exportTemplateFile.value) {
+    exportUploadRequest.error = '请选择 Excel 模板文件'
+    return
+  }
+  await exportUploadRequest.run(
     async () => {
-      const payload = {
-        name: importEdit.name,
-        fields: importEdit.fields.map((field) => ({ ...field })),
-      }
-      const updated = await updateImportTemplate(selectedImportKey.value, payload)
-      const index = importTemplates.value.findIndex(
-        (item) => item.template_key === selectedImportKey.value,
-      )
-      if (index >= 0) {
-        importTemplates.value[index] = updated
-      }
-      applySelectedImport()
+      const data = await uploadExportTemplateFile('labor_hours', exportTemplateFile.value as File)
+      exportTemplateName.value = data.name || ''
+      exportIssues.value = data.issues ?? []
     },
-    { successMessage: '导入模板已保存' },
+    { successMessage: '导出模板已更新' },
   )
-}
-
-const loadExportTemplate = async () => {
-  await exportRequest.run(async () => {
-  exportTemplate.value = await getExportTemplate('labor_hours')
-  applyExportTemplate()
-})
-}
-
-const applyExportTemplate = () => {
-  if (!exportTemplate.value) return
-  exportTemplateName.value = exportTemplate.value.name
-  const layout = exportTemplate.value.layout as ExportLayout
-  exportLayout.title = layout.title || ''
-  exportLayout.sections = Array.isArray(layout.sections) ? layout.sections : []
-  exportLayout.signature = layout.signature || {
-    first_label: '初审教师签名',
-    final_label: '复审教师签名',
-  }
-}
-
-const handleSaveExportTemplate = async () => {
-  await exportSaveRequest.run(
-    async () => {
-      const payload = {
-        name: exportTemplateName.value || '劳动教育学时认定表',
-        layout: {
-          title: exportLayout.title,
-          sections: exportLayout.sections,
-          signature: exportLayout.signature,
-        },
-      }
-      exportTemplate.value = await updateExportTemplate('labor_hours', payload)
-      exportTemplateName.value = exportTemplate.value.name
-    },
-    { successMessage: '导出模板已保存' },
-  )
-}
-
-const addInfoSection = () => {
-  exportLayout.sections.push({ type: 'info', title: '信息区块', fields: [] })
-}
-
-const addTableSection = () => {
-  exportLayout.sections.push({ type: 'table', title: '表格区块', columns: [] })
-}
-
-const addSectionField = (section: LayoutSection) => {
-  if (section.type === 'info') {
-    section.fields.push({ key: '', label: '' })
-  } else {
-    section.columns.push({ key: '', label: '' })
-  }
-}
-
-const removeSectionField = (section: LayoutSection, index: number) => {
-  if (section.type === 'info') {
-    section.fields.splice(index, 1)
-  } else {
-    section.columns.splice(index, 1)
-  }
-}
-
-const removeSection = (index: number) => {
-  exportLayout.sections.splice(index, 1)
 }
 
 const loadLaborRules = async () => {
@@ -252,11 +122,8 @@ const handleSaveLaborRules = async () => {
   )
 }
 
-watch(selectedImportKey, applySelectedImport)
-
 onMounted(() => {
   void loadFormFields()
-  void loadImportTemplates().then(applySelectedImport)
   void loadExportTemplate()
   void loadLaborRules()
 })
@@ -265,7 +132,7 @@ onMounted(() => {
 <template>
   <section class="hero">
     <h1>模板与规则配置</h1>
-    <p>维护表单字段、导入映射、导出模板与劳动学时规则。</p>
+    <p>维护表单字段、导出模板与劳动学时规则。</p>
   </section>
 
   <el-tabs v-model="activeTab" type="card">
@@ -313,115 +180,40 @@ onMounted(() => {
       </div>
     </el-tab-pane>
 
-    <el-tab-pane label="导入模板" name="import">
-      <el-card class="card">
-        <div class="form-row">
-          <el-select v-model="selectedImportKey" style="min-width: 240px">
-            <el-option v-for="opt in importOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-          </el-select>
-          <el-input v-model="importEdit.name" placeholder="模板名称" style="max-width: 260px" />
-          <el-button type="primary" :loading="importSaveRequest.loading" @click="handleSaveImportTemplate">
-            保存模板
-          </el-button>
-        </div>
-
-        <el-table :data="importEdit.fields" style="margin-top: 16px">
-          <el-table-column label="排序" width="80">
-            <template #default="{ row }">
-              <el-input-number v-model="row.order_index" :min="1" />
-            </template>
-          </el-table-column>
-          <el-table-column label="字段 Key" width="160">
-            <template #default="{ row }">
-              <el-input v-model="row.field_key" disabled />
-            </template>
-          </el-table-column>
-          <el-table-column label="字段标签" width="160">
-            <template #default="{ row }">
-              <el-input v-model="row.label" disabled />
-            </template>
-          </el-table-column>
-          <el-table-column label="表头映射">
-            <template #default="{ row }">
-              <el-input v-model="row.column_title" />
-            </template>
-          </el-table-column>
-          <el-table-column label="必填" width="90">
-            <template #default="{ row }">
-              <el-switch v-model="row.required" />
-            </template>
-          </el-table-column>
-          <el-table-column label="说明">
-            <template #default="{ row }">
-              <el-input v-model="row.description" />
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-    </el-tab-pane>
-
     <el-tab-pane label="导出模板" name="export">
       <el-card class="card">
-        <div class="form-row">
-          <el-input v-model="exportTemplateName" placeholder="模板名称" style="max-width: 260px" />
-          <el-input v-model="exportLayout.title" placeholder="PDF 标题" style="max-width: 260px" />
-          <el-button type="primary" :loading="exportSaveRequest.loading" @click="handleSaveExportTemplate">
-            保存导出模板
-          </el-button>
+        <h3>上传劳动教育学时认定 PDF 模板</h3>
+        <p>请上传包含占位符的 Excel 文件，后端将校验并用于导出 PDF。</p>
+        <el-upload
+          :auto-upload="false"
+          :limit="1"
+          :show-file-list="true"
+          :on-change="handleExportFileChange"
+        >
+          <el-button>选择 Excel 模板</el-button>
+        </el-upload>
+        <el-button
+          type="primary"
+          style="margin-top: 12px"
+          :loading="exportUploadRequest.loading"
+          @click="handleExportUpload"
+        >
+          上传并校验
+        </el-button>
+        <div v-if="exportTemplateName" style="margin-top: 12px">
+          <strong>当前模板：</strong>{{ exportTemplateName }}
         </div>
-        <div class="hint" style="margin-top: 12px">
-          <strong>可用字段 Key：</strong>
-          <span>{{ templateKeysHint.join('、') }}</span>
-        </div>
-
-        <div class="section-actions" style="margin-top: 16px">
-          <el-button @click="addInfoSection">新增信息区块</el-button>
-          <el-button @click="addTableSection">新增表格区块</el-button>
-        </div>
-
-        <div class="card-grid" style="margin-top: 16px">
-          <el-card v-for="(section, index) in exportLayout.sections" :key="index" class="card">
-            <div class="form-row">
-              <el-tag type="info">{{ section.type === 'info' ? '信息区块' : '表格区块' }}</el-tag>
-              <el-input v-model="section.title" placeholder="区块标题" />
-              <el-button type="danger" plain @click="removeSection(index)">删除区块</el-button>
-            </div>
-            <el-table
-              :data="section.type === 'info' ? section.fields : section.columns"
-              style="margin-top: 12px"
-            >
-              <el-table-column label="字段 Key">
-                <template #default="{ row }">
-                  <el-input v-model="row.key" placeholder="student_no / contest_name / custom.xxx" />
-                </template>
-              </el-table-column>
-              <el-table-column label="字段标签">
-                <template #default="{ row }">
-                  <el-input v-model="row.label" placeholder="显示名称" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="120">
-                <template #default="{ $index }">
-                  <el-button type="danger" text @click="removeSectionField(section, $index)">
-                    删除
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-button style="margin-top: 8px" @click="addSectionField(section)">新增字段</el-button>
-          </el-card>
-        </div>
-
-        <el-divider />
-        <h3>签名配置</h3>
-        <el-form label-position="top" style="max-width: 320px">
-          <el-form-item label="初审签名标签">
-            <el-input v-model="exportLayout.signature!.first_label" />
-          </el-form-item>
-          <el-form-item label="复审签名标签">
-            <el-input v-model="exportLayout.signature!.final_label" />
-          </el-form-item>
-        </el-form>
+        <el-alert
+          v-if="exportIssues.length"
+          style="margin-top: 12px"
+          type="error"
+          show-icon
+          :title="`模板校验发现 ${exportIssues.length} 个问题`"
+          :closable="false"
+        />
+        <ul v-if="exportIssues.length" style="margin-top: 8px">
+          <li v-for="(issue, index) in exportIssues" :key="index">{{ issue }}</li>
+        </ul>
       </el-card>
     </el-tab-pane>
 
@@ -464,10 +256,8 @@ onMounted(() => {
     v-if="
       formFieldRequest.error ||
       listRequest.error ||
-      importRequest.error ||
-      importSaveRequest.error ||
       exportRequest.error ||
-      exportSaveRequest.error ||
+      exportUploadRequest.error ||
       laborRequest.error ||
       laborSaveRequest.error
     "
@@ -478,10 +268,8 @@ onMounted(() => {
     :title="
       formFieldRequest.error ||
       listRequest.error ||
-      importRequest.error ||
-      importSaveRequest.error ||
       exportRequest.error ||
-      exportSaveRequest.error ||
+      exportUploadRequest.error ||
       laborRequest.error ||
       laborSaveRequest.error
     "

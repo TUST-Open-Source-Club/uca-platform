@@ -6,6 +6,7 @@ use calamine::{Data, Reader};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Cursor;
 use uuid::Uuid;
 use validator::Validate;
@@ -15,7 +16,7 @@ use crate::{
     auth::hash_password,
     entities::{students, users, Student, User},
     error::AppError,
-    templates::{build_header_index, load_import_template, map_import_fields, read_cell_by_index},
+    templates::{build_header_index, read_cell_by_index},
     state::AppState,
 };
 
@@ -279,23 +280,12 @@ pub async fn import_students(
     let user = require_session_user(&state, &jar).await?;
     require_role(&user, "admin")?;
 
-    let mut file_bytes = None;
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| AppError::bad_request("invalid multipart"))?
-    {
-        if field.name() == Some("file") {
-            let bytes = field
-                .bytes()
-                .await
-                .map_err(|_| AppError::bad_request("failed to read file"))?;
-            file_bytes = Some(bytes);
-            break;
-        }
-    }
-
-    let file_bytes = file_bytes.ok_or_else(|| AppError::bad_request("file field required"))?;
+    let (file_bytes, fields) = read_upload_payload(&mut multipart).await?;
+    let field_map = fields
+        .get("field_map")
+        .map(|value| serde_json::from_str::<HashMap<String, String>>(value))
+        .transpose()
+        .map_err(|_| AppError::bad_request("invalid field_map"))?;
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
     let sheet_name = workbook
@@ -307,9 +297,8 @@ pub async fn import_students(
         .worksheet_range(&sheet_name)
         .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
-    let template = load_import_template(&state, "students").await?;
     let header_index = build_header_index(range.rows().next());
-    let base_index = map_import_fields(&header_index, &template.fields)?;
+    let base_index = build_student_field_map(&header_index, field_map.as_ref())?;
 
     let transaction = state
         .db
@@ -396,6 +385,105 @@ fn read_cell_by_index_opt(index: Option<&usize>, row: &[calamine::Data]) -> Stri
         None => return String::new(),
     };
     read_cell_by_index(idx, row)
+}
+
+async fn read_upload_payload(
+    multipart: &mut Multipart,
+) -> Result<(Vec<u8>, HashMap<String, String>), AppError> {
+    let mut file_bytes = None;
+    let mut fields = HashMap::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::bad_request("invalid multipart"))?
+    {
+        let name = field.name().map(|value| value.to_string());
+        match name.as_deref() {
+            Some("file") => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read file"))?;
+                file_bytes = Some(bytes.to_vec());
+            }
+            Some(key) => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read field"))?;
+                fields.insert(key.to_string(), value);
+            }
+            None => {}
+        }
+    }
+    let file_bytes = file_bytes.ok_or_else(|| AppError::bad_request("file field required"))?;
+    Ok((file_bytes, fields))
+}
+
+fn build_student_field_map(
+    header_index: &HashMap<String, usize>,
+    field_map: Option<&HashMap<String, String>>,
+) -> Result<HashMap<String, usize>, AppError> {
+    let mut result = HashMap::new();
+    for (key, candidates, required) in [
+        ("student_no", &["学号", "student_no"][..], true),
+        ("name", &["姓名", "name"][..], true),
+        ("gender", &["性别", "gender"][..], false),
+        ("department", &["院系", "department"][..], false),
+        ("major", &["专业", "major"][..], false),
+        ("class_name", &["班级", "class_name"][..], false),
+        ("phone", &["手机号", "phone"][..], false),
+    ] {
+        let override_value = field_map.and_then(|map| map.get(key).map(|value| value.as_str()));
+        let idx = resolve_column_index(header_index, override_value, candidates);
+        if required && idx.is_none() {
+            return Err(AppError::bad_request("missing required header"));
+        }
+        if let Some(idx) = idx {
+            result.insert(key.to_string(), idx);
+        }
+    }
+    Ok(result)
+}
+
+fn resolve_column_index(
+    header_index: &HashMap<String, usize>,
+    column: Option<&str>,
+    fallback: &[&str],
+) -> Option<usize> {
+    if let Some(value) = column {
+        let trimmed = value.trim();
+        if let Some(idx) = parse_column_reference(trimmed) {
+            return Some(idx);
+        }
+        if let Some(idx) = header_index.get(trimmed) {
+            return Some(*idx);
+        }
+    }
+    fallback.iter().find_map(|key| header_index.get(*key).copied())
+}
+
+fn parse_column_reference(value: &str) -> Option<usize> {
+    if value.is_empty() {
+        return None;
+    }
+    if value.chars().all(|ch| ch.is_ascii_digit()) {
+        let number = value.parse::<usize>().ok()?;
+        return number.checked_sub(1);
+    }
+    if value.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        let mut index = 0usize;
+        for ch in value.chars() {
+            let upper = ch.to_ascii_uppercase();
+            let offset = upper as u8;
+            if offset < b'A' || offset > b'Z' {
+                return None;
+            }
+            index = index * 26 + (offset - b'A' + 1) as usize;
+        }
+        return index.checked_sub(1);
+    }
+    None
 }
 
 async fn upsert_student_user<C>(

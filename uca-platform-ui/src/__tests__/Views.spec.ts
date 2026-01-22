@@ -123,6 +123,7 @@ const stubs = {
   'el-descriptions': { template: '<div><slot /></div>' },
   'el-descriptions-item': { template: '<div><slot /></div>' },
   'el-pagination': { template: '<div />' },
+  'el-date-picker': { template: '<input />' },
 }
 
 describe('Views', () => {

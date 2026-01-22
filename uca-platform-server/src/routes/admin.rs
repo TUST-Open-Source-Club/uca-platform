@@ -6,7 +6,7 @@ use calamine::{Data, Reader};
 use chrono::{Duration as ChronoDuration, Utc};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Cursor;
 use uuid::Uuid;
 use validator::Validate;
@@ -16,9 +16,9 @@ use crate::{
     auth::{generate_token, hash_password, hash_token},
     entities::{
         attachments, auth_resets, competition_library, contest_records, form_field_values, form_fields,
-        import_template_fields, import_templates, invites, review_signatures, students, users,
+        invites, review_signatures, students, users,
         Attachment, CompetitionLibrary, ContestRecord, FormField, FormFieldValue,
-        ImportTemplate, ImportTemplateField, ReviewSignature, Student, User,
+        ReviewSignature, Student, User,
     },
     error::AppError,
     labor_hours::{load_labor_hour_rules, upsert_labor_hour_rules, LaborHourRuleConfig},
@@ -26,8 +26,8 @@ use crate::{
     policy::{load_password_policy, upsert_password_policy},
     state::AppState,
     templates::{
-        load_export_template, load_import_template, map_import_fields, upsert_export_template,
-        ExportTemplateConfig, ImportFieldConfig, ImportTemplateConfig,
+        export_template_file_path, load_export_template, upsert_export_template_meta,
+        ExportTemplateConfig,
     },
 };
 
@@ -127,72 +127,12 @@ pub struct PasswordPolicyResponse {
     pub require_symbol: bool,
 }
 
-/// 导入模板字段请求。
-#[derive(Debug, Deserialize, Serialize, Validate)]
-pub struct ImportTemplateFieldRequest {
-    /// 字段 key。
-    #[validate(length(min = 1, max = 64))]
-    pub field_key: String,
-    /// 字段标签。
-    #[validate(length(min = 1, max = 64))]
-    pub label: String,
-    /// Excel 表头。
-    #[validate(length(max = 128))]
-    pub column_title: String,
-    /// 是否必填。
-    pub required: bool,
-    /// 排序序号。
-    pub order_index: i32,
-    /// 字段说明。
-    pub description: Option<String>,
-}
-
-/// 导入模板更新请求。
-#[derive(Debug, Deserialize, Validate)]
-pub struct ImportTemplateRequest {
-    /// 模板名称。
-    #[validate(length(min = 1, max = 64))]
-    pub name: String,
-    /// 字段列表。
-    #[validate(length(min = 1))]
-    pub fields: Vec<ImportTemplateFieldRequest>,
-}
-
-/// 导入模板响应。
-#[derive(Debug, Serialize)]
-pub struct ImportTemplateResponse {
-    pub template_key: String,
-    pub name: String,
-    pub fields: Vec<ImportTemplateFieldResponse>,
-}
-
-/// 导入模板字段响应。
-#[derive(Debug, Serialize)]
-pub struct ImportTemplateFieldResponse {
-    pub field_key: String,
-    pub label: String,
-    pub column_title: String,
-    pub required: bool,
-    pub order_index: i32,
-    pub description: Option<String>,
-}
-
-/// 导出模板请求。
-#[derive(Debug, Deserialize, Validate)]
-pub struct ExportTemplateRequest {
-    /// 模板名称。
-    #[validate(length(min = 1, max = 64))]
-    pub name: String,
-    /// 布局 JSON。
-    pub layout: serde_json::Value,
-}
-
-/// 导出模板响应。
+/// 导出模板响应（文件信息）。
 #[derive(Debug, Serialize)]
 pub struct ExportTemplateResponse {
     pub template_key: String,
     pub name: String,
-    pub layout: serde_json::Value,
+    pub issues: Vec<String>,
 }
 
 /// 重置认证方式请求。
@@ -222,23 +162,32 @@ pub struct ResetCodeResponse {
 struct CompetitionSheetPlan {
     name: String,
     year: Option<i32>,
+    name_column: Option<String>,
+    category_column: Option<String>,
+    category_suffix: Option<String>,
 }
 
 const INVITE_TTL_HOURS: i64 = 72;
 const RESET_TTL_MINUTES: i64 = 24 * 60;
 
 const COMPETITION_HEADER: [&str; 2] = ["竞赛名称", "name"];
-const CONTEST_BASE_HEADERS: [(&str, &[&str]); 6] = [
+const COMPETITION_CATEGORY_HEADERS: [&str; 3] = ["竞赛类型", "竞赛类别", "category"];
+const COMPETITION_YEAR_HEADERS: [&str; 3] = ["年份", "year", "年度"];
+const CONTEST_IMPORT_HEADERS: [(&str, &[&str]); 13] = [
     ("student_no", &["学号", "student_no"]),
     ("contest_name", &["竞赛名称", "contest_name"]),
+    ("contest_level", &["竞赛级别", "contest_level"]),
+    ("contest_role", &["角色", "contest_role"]),
     ("award_level", &["获奖等级", "award_level"]),
     ("self_hours", &["自评学时", "self_hours"]),
+    ("contest_year", &["年份", "contest_year", "年度"]),
+    ("contest_category", &["竞赛类型", "竞赛类别", "contest_category"]),
+    ("award_date", &["时间", "award_date", "获奖时间"]),
     ("first_review_hours", &["初审学时", "first_review_hours"]),
     ("final_review_hours", &["复审学时", "final_review_hours"]),
+    ("status", &["审核状态", "status"]),
+    ("rejection_reason", &["不通过原因", "rejection_reason"]),
 ];
-const STATUS_HEADERS: [&str; 2] = ["审核状态", "status"];
-const REJECTION_HEADERS: [&str; 2] = ["不通过原因", "rejection_reason"];
-const IMPORT_TEMPLATE_KEYS: [&str; 3] = ["competition_library", "students", "contest_records"];
 const EXPORT_TEMPLATE_KEYS: [&str; 1] = ["labor_hours"];
 
 /// 查询竞赛库。
@@ -845,7 +794,6 @@ pub async fn import_competitions(
         return Err(AppError::bad_request("xlsx has no sheets"));
     }
 
-    let template = load_import_template(&state, "competition_library").await?;
     let mut inserted = 0usize;
     let mut skipped = 0usize;
 
@@ -858,6 +806,9 @@ pub async fn import_competitions(
         vec![CompetitionSheetPlan {
             name: sheet_names[0].clone(),
             year: None,
+            name_column: None,
+            category_column: None,
+            category_suffix: None,
         }]
     };
 
@@ -866,13 +817,28 @@ pub async fn import_competitions(
             let message = format!("worksheet not found: {}", plan.name);
             return Err(AppError::bad_request(&message));
         }
+        if let Some(suffix) = plan.category_suffix.as_deref() {
+            if !matches!(suffix, "class" | "class_contest") {
+                return Err(AppError::validation("invalid category_suffix"));
+            }
+        }
         let range = workbook
             .worksheet_range(&plan.name)
             .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
         let header_index = build_header_index(range.rows().next());
-        let field_map = map_import_fields(&header_index, &template.fields)?;
-        let year_idx = field_map.get("contest_year").copied();
+        let name_idx = resolve_column_index(
+            &header_index,
+            plan.name_column.as_deref(),
+            &COMPETITION_HEADER,
+        )
+        .ok_or_else(|| AppError::bad_request("missing contest name column"))?;
+        let category_idx = resolve_column_index(
+            &header_index,
+            plan.category_column.as_deref(),
+            &COMPETITION_CATEGORY_HEADERS,
+        );
+        let year_idx = resolve_column_index(&header_index, None, &COMPETITION_YEAR_HEADERS);
         let sheet_default_year = plan.year.or(default_year);
         if year_idx.is_none() && sheet_default_year.is_none() {
             let message = format!(
@@ -883,20 +849,21 @@ pub async fn import_competitions(
         }
 
         for row in range.rows().skip(1) {
-            let name = field_map
-                .get("contest_name")
-                .map(|idx| read_cell_by_index(*idx, row))
-                .unwrap_or_default();
+            let name = read_cell_by_index(name_idx, row);
             if name.is_empty() {
                 continue;
             }
             let year = year_idx
                 .and_then(|idx| read_cell_by_index(idx, row).parse::<i32>().ok())
                 .or(sheet_default_year);
-            let category = field_map
-                .get("contest_category")
-                .map(|idx| read_cell_by_index(*idx, row))
-                .filter(|value| !value.is_empty());
+            let category = read_cell_by_index_opt(category_idx.as_ref(), row)
+                .trim()
+                .to_string();
+            let category = if category.is_empty() {
+                None
+            } else {
+                Some(normalize_category(&category, plan.category_suffix.as_deref()))
+            };
             let exists = CompetitionLibrary::find()
                 .filter(competition_library::Column::Name.eq(&name))
                 .one(&state.db)
@@ -1036,151 +1003,6 @@ pub async fn create_form_field(
     }))
 }
 
-/// 获取导入模板列表（仅管理员）。
-pub async fn list_import_templates(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> Result<Json<Vec<ImportTemplateResponse>>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-
-    let mut templates = Vec::new();
-    for key in IMPORT_TEMPLATE_KEYS {
-        let config = load_import_template(&state, key).await?;
-        templates.push(import_template_to_response(config));
-    }
-    Ok(Json(templates))
-}
-
-/// 更新导入模板（仅管理员）。
-pub async fn update_import_template(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Path(template_key): Path<String>,
-    Json(payload): Json<ImportTemplateRequest>,
-) -> Result<Json<ImportTemplateResponse>, AppError> {
-    let user = require_session_user(&state, &jar).await?;
-    require_role(&user, "admin")?;
-    payload
-        .validate()
-        .map_err(|_| AppError::validation("invalid import template payload"))?;
-
-    if !IMPORT_TEMPLATE_KEYS.contains(&template_key.as_str()) {
-        return Err(AppError::bad_request("unknown template key"));
-    }
-
-    let base_template = load_import_template(&state, &template_key).await?;
-    let mut label_map = HashMap::new();
-    for field in base_template.fields {
-        label_map.insert(field.field_key, field.label);
-    }
-
-    let mut seen = HashSet::new();
-    for field in &payload.fields {
-        field
-            .validate()
-            .map_err(|_| AppError::validation("invalid import template field"))?;
-        if field.required && field.column_title.trim().is_empty() {
-            return Err(AppError::validation("required column title missing"));
-        }
-        if !seen.insert(field.field_key.as_str()) {
-            return Err(AppError::validation("duplicate field key"));
-        }
-    }
-
-    let transaction = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let now = Utc::now();
-    let template = ImportTemplate::find()
-        .filter(import_templates::Column::TemplateKey.eq(&template_key))
-        .one(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-    let template_id = if let Some(existing) = template {
-        let mut active: import_templates::ActiveModel = existing.into();
-        active.name = Set(payload.name.clone());
-        active.updated_at = Set(now);
-        let updated = active
-            .update(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        updated.id
-    } else {
-        let id = Uuid::new_v4();
-        let model = import_templates::ActiveModel {
-            id: Set(id),
-            template_key: Set(template_key.clone()),
-            name: Set(payload.name.clone()),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        import_templates::Entity::insert(model)
-            .exec_without_returning(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-        id
-    };
-
-    ImportTemplateField::delete_many()
-        .filter(import_template_fields::Column::TemplateId.eq(template_id))
-        .exec(&transaction)
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    for field in &payload.fields {
-        let label = label_map
-            .get(&field.field_key)
-            .cloned()
-            .unwrap_or_else(|| field.label.clone());
-        let model = import_template_fields::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            template_id: Set(template_id),
-            field_key: Set(field.field_key.clone()),
-            label: Set(label),
-            column_title: Set(field.column_title.clone()),
-            required: Set(field.required),
-            order_index: Set(field.order_index),
-            description: Set(field.description.clone()),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        import_template_fields::Entity::insert(model)
-            .exec_without_returning(&transaction)
-            .await
-            .map_err(|err| AppError::Database(err.to_string()))?;
-    }
-
-    transaction
-        .commit()
-        .await
-        .map_err(|err| AppError::Database(err.to_string()))?;
-
-    let config = ImportTemplateConfig {
-        template_key,
-        name: payload.name,
-        fields: payload
-            .fields
-            .into_iter()
-            .map(|field| ImportFieldConfig {
-                field_key: field.field_key.clone(),
-                label: label_map
-                    .get(&field.field_key)
-                    .cloned()
-                    .unwrap_or(field.label),
-                column_title: field.column_title,
-                required: field.required,
-                order_index: field.order_index,
-                description: field.description,
-            })
-            .collect(),
-    };
-    Ok(Json(import_template_to_response(config)))
-}
-
 /// 获取导出模板（仅管理员）。
 pub async fn get_export_template(
     State(state): State<AppState>,
@@ -1193,28 +1015,41 @@ pub async fn get_export_template(
         return Err(AppError::bad_request("unknown template key"));
     }
 
-    let config = load_export_template(&state, &template_key).await?;
+    let mut config = load_export_template(&state, &template_key).await?;
+    let template_path = export_template_file_path(&state, &template_key);
+    if !template_path.exists() {
+        config.name.clear();
+        config.issues.clear();
+    }
     Ok(Json(export_template_to_response(config)))
 }
 
-/// 更新导出模板（仅管理员）。
-pub async fn update_export_template(
+/// 上传导出模板（仅管理员）。
+pub async fn upload_export_template(
     State(state): State<AppState>,
     jar: CookieJar,
     Path(template_key): Path<String>,
-    Json(payload): Json<ExportTemplateRequest>,
+    mut multipart: Multipart,
 ) -> Result<Json<ExportTemplateResponse>, AppError> {
     let user = require_session_user(&state, &jar).await?;
     require_role(&user, "admin")?;
-    payload
-        .validate()
-        .map_err(|_| AppError::validation("invalid export template payload"))?;
     if !EXPORT_TEMPLATE_KEYS.contains(&template_key.as_str()) {
         return Err(AppError::bad_request("unknown template key"));
     }
 
+    let (file_bytes, file_name) = read_upload_file(&mut multipart).await?;
+    let issues = crate::export_template::validate_export_template_bytes(&file_bytes)?;
+
+    let template_path = export_template_file_path(&state, &template_key);
+    if let Some(parent) = template_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| AppError::internal(&format!("create template dir failed: {err}")))?;
+    }
+    std::fs::write(&template_path, &file_bytes)
+        .map_err(|err| AppError::internal(&format!("save template failed: {err}")))?;
+
     let updated =
-        upsert_export_template(&state, &template_key, payload.name, payload.layout).await?;
+        upsert_export_template_meta(&state, &template_key, file_name, issues).await?;
     Ok(Json(export_template_to_response(updated)))
 }
 
@@ -1483,7 +1318,12 @@ pub async fn import_contest_records(
     let user = require_session_user(&state, &jar).await?;
     require_role(&user, "admin")?;
 
-    let file_bytes = read_upload_bytes(&mut multipart).await?;
+    let (file_bytes, fields) = read_upload_payload(&mut multipart).await?;
+    let field_map = fields
+        .get("field_map")
+        .map(|value| serde_json::from_str::<HashMap<String, String>>(value))
+        .transpose()
+        .map_err(|_| AppError::bad_request("invalid field_map"))?;
     let mut workbook = calamine::Xlsx::new(Cursor::new(file_bytes))
         .map_err(|_| AppError::bad_request("invalid xlsx file"))?;
     let sheet_name = workbook
@@ -1495,11 +1335,11 @@ pub async fn import_contest_records(
         .worksheet_range(&sheet_name)
         .map_err(|_| AppError::bad_request("failed to read worksheet"))?;
 
-    let template = load_import_template(&state, "contest_records").await?;
     let header_index = build_header_index(range.rows().next());
-    let base_index = map_import_fields(&header_index, &template.fields)?;
+    let base_index = build_contest_field_map(&header_index, field_map.as_ref())?;
 
-    let field_map = load_form_field_map(&state, "contest").await?;
+    let custom_field_map = load_form_field_map(&state, "contest").await?;
+    let reserved_headers = collect_reserved_headers_by_index(&header_index, &base_index);
 
     let transaction = state
         .db
@@ -1583,19 +1423,13 @@ pub async fn import_contest_records(
             .await
             .map_err(|err| AppError::Database(err.to_string()))?;
 
-        let reserved_headers = template
-            .fields
-            .iter()
-            .map(|field| field.column_title.clone())
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
         insert_custom_fields(
             &transaction,
             "contest",
             record_id,
             row,
             &header_index,
-            &field_map,
+            &custom_field_map,
             &reserved_headers,
         )
         .await?;
@@ -1622,6 +1456,27 @@ async fn read_upload_bytes(multipart: &mut Multipart) -> Result<Vec<u8>, AppErro
                 .await
                 .map_err(|_| AppError::bad_request("failed to read file"))?;
             return Ok(bytes.to_vec());
+        }
+    }
+    Err(AppError::bad_request("file field required"))
+}
+
+async fn read_upload_file(multipart: &mut Multipart) -> Result<(Vec<u8>, String), AppError> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::bad_request("invalid multipart"))?
+    {
+        if field.name() == Some("file") {
+            let name = field
+                .file_name()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "template.xlsx".to_string());
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|_| AppError::bad_request("failed to read file"))?;
+            return Ok((bytes.to_vec(), name));
         }
     }
     Err(AppError::bad_request("file field required"))
@@ -1693,30 +1548,113 @@ fn map_base_indices(
     result
 }
 
-fn import_template_to_response(template: ImportTemplateConfig) -> ImportTemplateResponse {
-    ImportTemplateResponse {
-        template_key: template.template_key,
-        name: template.name,
-        fields: template
-            .fields
-            .into_iter()
-            .map(|field| ImportTemplateFieldResponse {
-                field_key: field.field_key,
-                label: field.label,
-                column_title: field.column_title,
-                required: field.required,
-                order_index: field.order_index,
-                description: field.description,
-            })
-            .collect(),
+fn resolve_column_index(
+    header_index: &HashMap<String, usize>,
+    column: Option<&str>,
+    fallback: &[&str],
+) -> Option<usize> {
+    if let Some(value) = column {
+        let trimmed = value.trim();
+        if let Some(idx) = parse_column_reference(trimmed) {
+            return Some(idx);
+        }
+        if let Some(idx) = header_index.get(trimmed) {
+            return Some(*idx);
+        }
     }
+    find_header_index(header_index, fallback)
+}
+
+fn build_contest_field_map(
+    header_index: &HashMap<String, usize>,
+    field_map: Option<&HashMap<String, String>>,
+) -> Result<HashMap<String, usize>, AppError> {
+    let mut result = HashMap::new();
+    for (key, candidates) in CONTEST_IMPORT_HEADERS {
+        let override_value = field_map.and_then(|map| map.get(key).map(|value| value.as_str()));
+        let idx = resolve_column_index(header_index, override_value, candidates);
+        let required = matches!(
+            key,
+            "student_no"
+                | "contest_name"
+                | "contest_level"
+                | "contest_role"
+                | "award_level"
+                | "self_hours"
+        );
+        if required && idx.is_none() {
+            return Err(AppError::bad_request("missing required header"));
+        }
+        if let Some(idx) = idx {
+            result.insert(key.to_string(), idx);
+        }
+    }
+    Ok(result)
+}
+
+fn collect_reserved_headers_by_index(
+    header_index: &HashMap<String, usize>,
+    base_index: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut reserved = Vec::new();
+    for idx in base_index.values() {
+        if let Some(name) = header_name_for_index(header_index, *idx) {
+            reserved.push(name);
+        }
+    }
+    reserved
+}
+
+fn header_name_for_index(
+    header_index: &HashMap<String, usize>,
+    index: usize,
+) -> Option<String> {
+    header_index
+        .iter()
+        .find_map(|(key, value)| (*value == index).then(|| key.clone()))
+}
+
+fn parse_column_reference(value: &str) -> Option<usize> {
+    if value.is_empty() {
+        return None;
+    }
+    if value.chars().all(|ch| ch.is_ascii_digit()) {
+        let number = value.parse::<usize>().ok()?;
+        return number.checked_sub(1);
+    }
+    if value.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        let mut index = 0usize;
+        for ch in value.chars() {
+            let upper = ch.to_ascii_uppercase();
+            let offset = upper as u8;
+            if offset < b'A' || offset > b'Z' {
+                return None;
+            }
+            index = index * 26 + (offset - b'A' + 1) as usize;
+        }
+        return index.checked_sub(1);
+    }
+    None
+}
+
+fn normalize_category(value: &str, suffix: Option<&str>) -> String {
+    let trimmed = value.trim();
+    let normalized = match suffix {
+        Some("class_contest") => trimmed
+            .strip_suffix("类竞赛")
+            .or_else(|| trimmed.strip_suffix("类"))
+            .unwrap_or(trimmed),
+        Some("class") => trimmed.strip_suffix("类").unwrap_or(trimmed),
+        _ => trimmed,
+    };
+    normalized.trim().to_string()
 }
 
 fn export_template_to_response(template: ExportTemplateConfig) -> ExportTemplateResponse {
     ExportTemplateResponse {
         template_key: template.template_key,
         name: template.name,
-        layout: template.layout,
+        issues: template.issues,
     }
 }
 

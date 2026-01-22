@@ -33,9 +33,15 @@ export async function queryStudents(filters: Record<string, unknown>): Promise<u
   })
 }
 
-export async function importStudents(file: File): Promise<{ inserted: number; updated: number }> {
+export async function importStudents(
+  file: File,
+  fieldMap?: Record<string, string>,
+): Promise<{ inserted: number; updated: number }> {
   const form = new FormData()
   form.append('file', file)
+  if (fieldMap && Object.keys(fieldMap).length) {
+    form.append('field_map', JSON.stringify(fieldMap))
+  }
   return requestMultipart('/students/import', form)
 }
 

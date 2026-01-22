@@ -1,5 +1,31 @@
 # Plan: VolunteerHours (MVP foundation)
 
+## Current Task: 导入弹窗配置 + PDF 导出模板（Excel） + 轻量化转换
+1) 删除导入模板配置功能
+- 移除后端 `/admin/import-templates` API 与 UI 引用。
+- 仅保留导入时的列映射与年度设置入口。
+
+2) 竞赛库导入弹窗（工作表/列映射）
+- 前端导入弹窗支持：工作表、年份、竞赛名称列、竞赛类别列、类别后缀。
+- 后端解析列映射（列字母/列序号/表头名称）并处理类别后缀。
+
+3) PDF 导出模板改为 Excel + 占位符
+- 后端新增 Excel 模板上传与校验接口。
+- 上传后保存模板文件与校验问题列表。
+- 导出时替换占位符并用 LibreOffice 转 PDF。
+- README 记录合法占位符与使用说明。
+
+4) 文档/测试同步
+- API 文档更新。
+- 相关后端/前端测试更新。
+
+## Verification
+- Frontend: `pnpm test:unit`
+- Backend: `cargo test`
+
+## Rollback
+- 使用 git 回退本次修改文件。
+
 ## Current Task: UI validation & auth flow + PDF layout
 1) 前端表单校验与状态统一
 - 增加统一的请求状态与错误提示封装（useRequest）。

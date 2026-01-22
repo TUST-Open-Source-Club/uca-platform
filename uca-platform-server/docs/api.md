@@ -529,14 +529,24 @@
 ```
 
 ### POST /students/import
-从 Excel 导入学生（仅管理员），multipart 字段 `file`。
+从 Excel 导入学生（仅管理员），multipart 字段 `file`，可选 `field_map` 指定字段映射。
 
 请求： `multipart/form-data`
 - `file`：腾讯文档导出的 `.xlsx` 文件
+- `field_map`（可选）：JSON 字符串，指定字段到列的映射
 
 响应：
 ```json
 { "inserted": 120, "updated": 5 }
+```
+
+`field_map` 示例（列可为表头/列字母/列序号）：
+```json
+{
+  "student_no": "学号",
+  "name": "B",
+  "major": "专业"
+}
 ```
 
 标准表头（学生导入）：
@@ -838,8 +848,20 @@ index | major | class_name | student_no | name | planned_hours | module_hours | 
 - `sheet_plan`：JSON 数组，指定导入的工作表与年份，例如：
 ```json
 [
-  { "name": "Sheet1", "year": 2024 },
-  { "name": "Sheet2", "year": 2023 }
+  {
+    "name": "Sheet1",
+    "year": 2024,
+    "name_column": "竞赛名称",
+    "category_column": "竞赛类型",
+    "category_suffix": "class"
+  },
+  {
+    "name": "Sheet2",
+    "year": 2023,
+    "name_column": "B",
+    "category_column": "C",
+    "category_suffix": "class_contest"
+  }
 ]
 ```
 
@@ -848,15 +870,11 @@ index | major | class_name | student_no | name | planned_hours | module_hours | 
 { "inserted": 10, "skipped": 2 }
 ```
 
-标准表头（竞赛库导入）：
-```
-年份 | 竞赛类型 | 竞赛名称
-```
-示例：
-```
-年份,竞赛类型,竞赛名称
-2024,A,全国大学生数学建模竞赛
-```
+说明：
+- `sheet_plan` 用于选择工作表并设置年份/列映射，可用表头名或列字母/序号。
+- 未提供 `sheet_plan` 时默认导入第一个工作表。
+- 若表格没有年份列且未设置 `year`，将返回提示错误。
+- `category_suffix` 可选值：`class`（去掉“类”后缀）、`class_contest`（去掉“类竞赛”后缀）。
 
 ### GET /admin/form-fields
 获取表单字段配置（管理员）。
@@ -881,59 +899,22 @@ index | major | class_name | student_no | name | planned_hours | module_hours | 
 contest | summary | student_export
 ```
 
-### GET /admin/import-templates
-获取导入模板配置（管理员）。
-
-响应示例：
-```json
-[
-  {
-    "template_key": "competition_library",
-    "name": "认可竞赛列表",
-    "fields": [
-      { "field_key": "contest_year", "label": "年份", "column_title": "年份", "required": true, "order_index": 1 }
-    ]
-  }
-]
-```
-
-### POST /admin/import-templates/{template_key}
-更新导入模板（管理员）。
-
-请求：
-```json
-{
-  "name": "学生获奖情况清单",
-  "fields": [
-    { "field_key": "student_no", "label": "学号", "column_title": "学号", "required": true, "order_index": 1 }
-  ]
-}
-```
-
 ### GET /admin/export-templates/{template_key}
 获取导出模板（管理员）。
 
-### POST /admin/export-templates/{template_key}
-更新导出模板（管理员）。
-
-请求：
+响应：
 ```json
-{
-  "name": "劳动教育学时认定表",
-  "layout": {
-    "title": "劳动教育学时认定表",
-    "sections": [
-      { "type": "info", "title": "学生信息", "fields": [{ "key": "student_no", "label": "学号" }] },
-      { "type": "table", "title": "竞赛获奖明细", "columns": [{ "key": "contest_name", "label": "竞赛名称" }] }
-    ],
-    "signature": { "first_label": "初审教师签名", "final_label": "复审教师签名" }
-  }
-}
+{ "template_key": "labor_hours", "name": "labor-hours.xlsx", "issues": [] }
 ```
 
+### POST /admin/export-templates/{template_key}/upload
+上传导出模板（管理员，Excel 格式）。
+
 说明：
-- 信息区块支持学生字段与汇总字段（如 `self_hours`、`approved_hours`、`reason`）。
-- 表格区块支持竞赛记录字段；自定义字段使用 `custom.{字段Key}` 形式。
+- 该模板用于导出 PDF，模板合法性校验后保存。
+- 响应会返回校验问题列表。
+- 占位符规则详见 README.md。
+- 请求为 multipart/form-data，包含 `file` 字段。
 
 ### GET /admin/labor-hour-rules
 获取劳动学时规则（管理员）。
@@ -984,11 +965,21 @@ contest | summary | student_export
 ```
 
 ### POST /admin/records/contest/import
-批量导入竞赛获奖记录（管理员，multipart 字段 `file`）。
+批量导入竞赛获奖记录（管理员，multipart 字段 `file`，可选 `field_map`）。
 
 响应：
 ```json
 { "inserted": 10, "skipped": 1 }
+```
+
+`field_map` 示例（列可为表头/列字母/列序号）：
+```json
+{
+  "student_no": "学号",
+  "contest_name": "竞赛名称",
+  "contest_level": "C",
+  "self_hours": "F"
+}
 ```
 
 标准表头（竞赛获奖导入，默认必填，可在导入模板中调整）：

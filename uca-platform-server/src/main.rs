@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::http::HeaderValue;
 use axum_server::tls_rustls::RustlsConfig;
 use sea_orm_migration::MigratorTrait;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tracing_subscriber::{fmt, EnvFilter};
 use webauthn_rs::prelude::WebauthnBuilder;
 
@@ -48,18 +48,45 @@ async fn main() -> Result<(), AppError> {
 
     let origin = HeaderValue::from_str(config.rp_origin.as_str())
         .map_err(|_| AppError::internal("invalid RP_ORIGIN header"))?;
-    let cors = CorsLayer::new()
-        .allow_origin(origin)
-        .allow_credentials(true)
-        .allow_headers([
-            axum::http::header::CONTENT_TYPE,
-            axum::http::header::AUTHORIZATION,
-        ])
-        .allow_methods([
+    let cors_allowed = if config.developer_mode {
+        let mut origins = vec![origin.clone()];
+        for dev_origin in [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://localhost:5173",
+            "https://127.0.0.1:5173",
+        ] {
+            let header = HeaderValue::from_str(dev_origin)
+                .map_err(|_| AppError::internal("invalid dev origin"))?;
+            origins.push(header);
+        }
+        AllowOrigin::list(origins)
+    } else {
+        AllowOrigin::exact(origin)
+    };
+    let cors = if config.developer_mode {
+        let cors_methods = AllowMethods::mirror_request();
+        CorsLayer::new()
+            .allow_origin(cors_allowed)
+            .allow_credentials(true)
+            .allow_headers(AllowHeaders::mirror_request())
+            .allow_methods(cors_methods)
+    } else {
+        let cors_methods = [
             axum::http::Method::GET,
             axum::http::Method::POST,
             axum::http::Method::DELETE,
-        ]);
+            axum::http::Method::OPTIONS,
+        ];
+        CorsLayer::new()
+            .allow_origin(cors_allowed)
+            .allow_credentials(true)
+            .allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::AUTHORIZATION,
+            ])
+            .allow_methods(cors_methods)
+    };
 
     let app = routes::router(state).layer(cors);
 

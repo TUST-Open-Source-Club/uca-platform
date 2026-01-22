@@ -11,6 +11,13 @@ import DevicesView from '../views/DevicesView.vue'
 import TwoFactorView from '../views/TwoFactorView.vue'
 import PurgeView from '../views/PurgeView.vue'
 import PublicCompetitionsView from '../views/PublicCompetitionsView.vue'
+import SetupView from '../views/SetupView.vue'
+
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,stub'),
+  },
+}))
 
 vi.mock('../api/forms', () => ({
   listFormFieldsByType: vi.fn().mockResolvedValue([
@@ -56,6 +63,23 @@ vi.mock('../api/admin', () => ({
   purgeStudent: vi.fn().mockResolvedValue({}),
   purgeVolunteerRecord: vi.fn().mockResolvedValue({}),
   purgeContestRecord: vi.fn().mockResolvedValue({}),
+  createUser: vi.fn().mockResolvedValue({ invite_sent: true }),
+  getPasswordPolicy: vi.fn().mockResolvedValue({
+    min_length: 8,
+    require_uppercase: false,
+    require_lowercase: false,
+    require_digit: true,
+    require_symbol: false,
+  }),
+  updatePasswordPolicy: vi.fn().mockResolvedValue({
+    min_length: 8,
+    require_uppercase: false,
+    require_lowercase: false,
+    require_digit: true,
+    require_symbol: false,
+  }),
+  resetUserTotp: vi.fn().mockResolvedValue({ status: 'ok' }),
+  resetUserPasskey: vi.fn().mockResolvedValue({ status: 'ok' }),
 }))
 
 vi.mock('../api/exports', () => ({
@@ -72,6 +96,9 @@ vi.mock('../api/auth', () => ({
   totpVerify: vi.fn().mockResolvedValue({}),
   listDevices: vi.fn().mockResolvedValue([]),
   regenerateRecoveryCodes: vi.fn().mockResolvedValue({ codes: [] }),
+  bootstrapStatus: vi.fn().mockResolvedValue({ ready: true, needs_totp: false }),
+  totpEnrollStart: vi.fn().mockResolvedValue({ enrollment_id: 'e1', otpauth_url: 'otpauth://totp/demo' }),
+  totpEnrollFinish: vi.fn().mockResolvedValue({ status: 'ok' }),
 }))
 
 const stubs = {
@@ -88,6 +115,7 @@ const stubs = {
   'el-table': { template: '<table><slot /></table>' },
   'el-table-column': { template: '<col />' },
   'el-empty': { template: '<div />' },
+  'el-divider': { template: '<hr />' },
 }
 
 describe('Views', () => {
@@ -136,6 +164,18 @@ describe('Views', () => {
   it('renders public competitions view', () => {
     const wrapper = mount(PublicCompetitionsView, { global: { stubs } })
     expect(wrapper.text()).toContain('竞赛清单')
+  })
+
+  it('renders setup view', () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/login', component: { template: '<div />' } },
+      ],
+    })
+    const wrapper = mount(SetupView, { global: { stubs, plugins: [createPinia(), router] } })
+    expect(wrapper.text()).toContain('设置向导')
   })
 
   it('renders two factor view', async () => {

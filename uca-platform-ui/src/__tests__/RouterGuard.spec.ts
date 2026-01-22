@@ -7,6 +7,7 @@ const getCurrentUser = vi.fn()
 
 vi.mock('../api/auth', () => ({
   getCurrentUser: (...args: unknown[]) => getCurrentUser(...args),
+  bootstrapStatus: vi.fn().mockResolvedValue({ ready: true, needs_totp: false }),
 }))
 
 const resetRouter = async () => {

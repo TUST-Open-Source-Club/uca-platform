@@ -1,4 +1,4 @@
-const DEFAULT_BASE = 'https://localhost:8443'
+const DEFAULT_BASE = import.meta.env.DEV ? 'http://localhost:8443' : 'https://localhost:8443'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? DEFAULT_BASE
 

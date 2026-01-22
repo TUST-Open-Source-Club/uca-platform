@@ -4,7 +4,7 @@ use axum::{extract::{State, Multipart}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use uuid::Uuid;
@@ -12,7 +12,8 @@ use validator::Validate;
 
 use crate::{
     access::{require_role, require_session_user},
-    entities::{students, Student},
+    auth::hash_password,
+    entities::{students, users, Student, User},
     error::AppError,
     state::AppState,
 };
@@ -114,6 +115,7 @@ pub async fn create_student(
                 .update(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
+            upsert_student_user(&state.db, &payload.student_no, &payload.name).await?;
             return Ok(Json(StudentResponse::from(model)));
         }
         return Err(AppError::bad_request("student number exists"));
@@ -138,6 +140,8 @@ pub async fn create_student(
         .exec_without_returning(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
+
+    upsert_student_user(&state.db, &payload.student_no, &payload.name).await?;
 
     let model = students::Model {
         id,
@@ -288,7 +292,7 @@ pub async fn import_students(
         let now = Utc::now();
         if let Some(record) = existing {
             let mut active: students::ActiveModel = record.into();
-            active.name = Set(name);
+            active.name = Set(name.clone());
             active.gender = Set(gender);
             active.department = Set(department);
             active.major = Set(major);
@@ -300,12 +304,13 @@ pub async fn import_students(
                 .update(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
+            upsert_student_user(&transaction, &student_no, &name).await?;
             updated += 1;
         } else {
             let model = students::ActiveModel {
                 id: Set(Uuid::new_v4()),
-                student_no: Set(student_no),
-                name: Set(name),
+                student_no: Set(student_no.clone()),
+                name: Set(name.clone()),
                 gender: Set(gender),
                 department: Set(department),
                 major: Set(major),
@@ -319,6 +324,7 @@ pub async fn import_students(
                 .exec_without_returning(&transaction)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;
+            upsert_student_user(&transaction, &student_no, &name).await?;
             inserted += 1;
         }
     }
@@ -332,6 +338,59 @@ pub async fn import_students(
         "inserted": inserted,
         "updated": updated
     })))
+}
+
+async fn upsert_student_user<C>(
+    db: &C,
+    student_no: &str,
+    name: &str,
+) -> Result<(), AppError>
+where
+    C: ConnectionTrait,
+{
+    let default_password = format!("st{student_no}");
+    let default_hash = hash_password(&default_password)?;
+    let now = Utc::now();
+    if let Some(existing) = User::find()
+        .filter(users::Column::Username.eq(student_no))
+        .one(db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+    {
+        let missing_password = existing.password_hash.is_none();
+        let mut active: users::ActiveModel = existing.into();
+        active.display_name = Set(name.to_string());
+        active.role = Set("student".to_string());
+        if missing_password {
+            active.password_hash = Set(Some(default_hash));
+        }
+        active.allow_password_login = Set(true);
+        active.updated_at = Set(now);
+        active
+            .update(db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+        return Ok(());
+    }
+
+    let model = users::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        username: Set(student_no.to_string()),
+        display_name: Set(name.to_string()),
+        role: Set("student".to_string()),
+        email: Set(None),
+        password_hash: Set(Some(default_hash)),
+        allow_password_login: Set(true),
+        password_updated_at: Set(Some(now)),
+        is_active: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    users::Entity::insert(model)
+        .exec_without_returning(db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    Ok(())
 }
 
 fn read_cell(index: &std::collections::HashMap<String, usize>, key: &str, row: &[Data]) -> String {

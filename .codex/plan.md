@@ -104,3 +104,30 @@ Implement the core backend + frontend skeleton for the VolunteerHours system bas
 
 ## Rollback
 - Revert changed files via git.
+
+## Current Task: 邀请注册 + 学生密码策略 + 初始化 TOTP 强制
+1) 初始化流程与二维码
+- Setup 页面展示 TOTP 二维码与密钥。
+- 引导流程强制完成 TOTP 后才允许进入登录页。
+ - 进度：已完成（Setup 向导支持二维码与强制绑定）。
+
+2) 用户体系与邀请注册
+- users 表补充邮箱、密码哈希、密码策略标记、是否允许密码登录等字段。
+- 新增邀请表：记录邀请 token、角色、邮箱、过期时间、使用状态。
+- 管理员创建非学生用户必须填写邮箱并发送邀请邮件；受邀用户注册时必须绑定 TOTP 或 Passkey。
+- 非学生不提供密码登录入口。
+ - 进度：后端/前端主流程已实现，待补充接口文档与联调验证。
+
+3) 学生密码与重置规则
+- 学生默认密码为 st+学号（按密码策略生成与校验）。
+- 学生允许密码登录，支持绑定邮箱后自助重置密码。
+- 非学生仅允许管理员发起 TOTP/Passkey 重置邀请。
+ - 进度：后端/前端已实现（含管理员密码策略配置与重置页面）。
+
+## Verification
+- Frontend: pnpm test:unit
+- Backend: cargo test
+- 手动验证：初始化向导 TOTP、邀请注册、学生密码登录/重置
+
+## Rollback
+- Revert changed files via git.

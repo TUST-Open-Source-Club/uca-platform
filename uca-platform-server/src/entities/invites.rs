@@ -1,22 +1,20 @@
-//! 用户账户。
+//! 邀请注册记录。
 
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "invites")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
+    pub token_hash: String,
+    pub email: String,
     pub username: String,
     pub display_name: String,
     pub role: String,
-    pub email: Option<String>,
-    pub password_hash: Option<String>,
-    pub allow_password_login: bool,
-    pub password_updated_at: Option<DateTimeUtc>,
-    pub is_active: bool,
+    pub expires_at: DateTimeUtc,
     pub created_at: DateTimeUtc,
-    pub updated_at: DateTimeUtc,
+    pub used_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

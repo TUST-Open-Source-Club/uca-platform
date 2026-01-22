@@ -3,7 +3,7 @@
 use axum::{extract::{State, Multipart, Path}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,12 +13,16 @@ use validator::Validate;
 
 use crate::{
     access::{require_role, require_session_user},
+    auth::{generate_token, hash_password, hash_token},
     entities::{
-        attachments, competition_library, contest_records, form_field_values, form_fields,
-        review_signatures, students, volunteer_records, Attachment, CompetitionLibrary, ContestRecord,
-        FormField, FormFieldValue, ReviewSignature, Student, VolunteerRecord,
+        attachments, auth_resets, competition_library, contest_records, form_field_values, form_fields,
+        invites, review_signatures, students, users, volunteer_records, Attachment,
+        CompetitionLibrary, ContestRecord, FormField, FormFieldValue, ReviewSignature, Student,
+        User, VolunteerRecord,
     },
     error::AppError,
+    mailer::send_mail,
+    policy::{load_password_policy, upsert_password_policy},
     state::AppState,
 };
 
@@ -38,6 +42,61 @@ pub struct CompetitionResponse {
     /// 竞赛名称。
     pub name: String,
 }
+
+/// 新建用户请求。
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateUserRequest {
+    /// 用户名（学号/工号）。
+    #[validate(length(min = 1, max = 64))]
+    pub username: String,
+    /// 展示名。
+    #[validate(length(min = 1, max = 64))]
+    pub display_name: String,
+    /// 角色（student/teacher/reviewer/admin）。
+    #[validate(length(min = 1, max = 16))]
+    pub role: String,
+    /// 邮箱（非学生必须提供）。
+    #[validate(email)]
+    pub email: Option<String>,
+}
+
+/// 新建用户响应。
+#[derive(Debug, Serialize)]
+pub struct CreateUserResponse {
+    /// 用户 ID。
+    pub user_id: Option<Uuid>,
+    /// 是否已发送邀请邮件。
+    pub invite_sent: bool,
+}
+
+/// 密码策略配置请求。
+#[derive(Debug, Deserialize)]
+pub struct PasswordPolicyRequest {
+    pub min_length: usize,
+    pub require_uppercase: bool,
+    pub require_lowercase: bool,
+    pub require_digit: bool,
+    pub require_symbol: bool,
+}
+
+/// 密码策略配置响应。
+#[derive(Debug, Serialize)]
+pub struct PasswordPolicyResponse {
+    pub min_length: usize,
+    pub require_uppercase: bool,
+    pub require_lowercase: bool,
+    pub require_digit: bool,
+    pub require_symbol: bool,
+}
+
+/// 重置认证方式请求。
+#[derive(Debug, Deserialize)]
+pub struct ResetUserRequest {
+    pub username: String,
+}
+
+const INVITE_TTL_HOURS: i64 = 72;
+const RESET_TTL_MINUTES: i64 = 30;
 
 const COMPETITION_HEADER: [&str; 2] = ["竞赛名称", "name"];
 const VOLUNTEER_BASE_HEADERS: [(&str, &[&str]); 6] = [
@@ -136,6 +195,306 @@ pub async fn create_competition(
         .map_err(|err| AppError::Database(err.to_string()))?;
 
     Ok(Json(CompetitionResponse { id, name }))
+}
+
+/// 管理员创建用户或发送邀请。
+pub async fn create_user(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<CreateUserRequest>,
+) -> Result<Json<CreateUserResponse>, AppError> {
+    let admin = require_session_user(&state, &jar).await?;
+    require_role(&admin, "admin")?;
+
+    payload
+        .validate()
+        .map_err(|_| AppError::validation("invalid user payload"))?;
+
+    let role = payload.role.as_str();
+    if !matches!(role, "student" | "teacher" | "reviewer" | "admin") {
+        return Err(AppError::validation("invalid role"));
+    }
+
+    if role == "student" {
+        let _student = Student::find()
+            .filter(students::Column::StudentNo.eq(&payload.username))
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .ok_or_else(|| AppError::bad_request("student not found"))?;
+
+        let now = Utc::now();
+        let default_password = format!("st{}", payload.username);
+        let hash = hash_password(&default_password)?;
+
+        if let Some(existing) = User::find()
+            .filter(users::Column::Username.eq(&payload.username))
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+        {
+            let missing_password = existing.password_hash.is_none();
+            let mut active: users::ActiveModel = existing.into();
+            active.display_name = Set(payload.display_name.clone());
+            active.role = Set("student".to_string());
+            if payload.email.is_some() {
+                active.email = Set(payload.email.clone());
+            }
+            if missing_password {
+                active.password_hash = Set(Some(hash));
+            }
+            active.allow_password_login = Set(true);
+            active.updated_at = Set(now);
+            let model = active
+                .update(&state.db)
+                .await
+                .map_err(|err| AppError::Database(err.to_string()))?;
+            return Ok(Json(CreateUserResponse {
+                user_id: Some(model.id),
+                invite_sent: false,
+            }));
+        }
+
+        let user_id = Uuid::new_v4();
+        let model = users::ActiveModel {
+            id: Set(user_id),
+            username: Set(payload.username.clone()),
+            display_name: Set(payload.display_name.clone()),
+            role: Set("student".to_string()),
+            email: Set(payload.email.clone()),
+            password_hash: Set(Some(hash)),
+            allow_password_login: Set(true),
+            password_updated_at: Set(Some(now)),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        users::Entity::insert(model)
+            .exec_without_returning(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?;
+
+        return Ok(Json(CreateUserResponse {
+            user_id: Some(user_id),
+            invite_sent: false,
+        }));
+    }
+
+    let email = payload
+        .email
+        .clone()
+        .ok_or_else(|| AppError::validation("email required"))?;
+    let base_url = state
+        .config
+        .base_url
+        .as_ref()
+        .ok_or_else(|| AppError::config("BASE_URL is required"))?;
+    let mail_config = state
+        .config
+        .mail
+        .as_ref()
+        .ok_or_else(|| AppError::config("mail config required"))?;
+
+    let existing = User::find()
+        .filter(users::Column::Username.eq(&payload.username))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    if existing.is_some() {
+        return Err(AppError::bad_request("user already exists"));
+    }
+
+    let token = generate_token();
+    let token_hash = hash_token(&token);
+    let now = Utc::now();
+    let expires_at = now + ChronoDuration::hours(INVITE_TTL_HOURS);
+    let invite_id = Uuid::new_v4();
+    let invite = invites::ActiveModel {
+        id: Set(invite_id),
+        token_hash: Set(token_hash),
+        email: Set(email.clone()),
+        username: Set(payload.username.clone()),
+        display_name: Set(payload.display_name.clone()),
+        role: Set(payload.role.clone()),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+        used_at: Set(None),
+    };
+    invites::Entity::insert(invite)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let link = format!("{}/invite?token={}", base_url, token);
+    let body = format!(
+        "您好，\n\n您被邀请加入 UCA Platform，请点击以下链接完成注册并绑定 TOTP 或 Passkey：\n{}\n\n该链接 {} 小时后失效。",
+        link, INVITE_TTL_HOURS
+    );
+    send_mail(mail_config, &email, "账号邀请", &body).await?;
+
+    Ok(Json(CreateUserResponse {
+        user_id: None,
+        invite_sent: true,
+    }))
+}
+
+/// 获取密码策略配置。
+pub async fn get_password_policy(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<PasswordPolicyResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    let policy = load_password_policy(&state).await?;
+    Ok(Json(PasswordPolicyResponse {
+        min_length: policy.min_length,
+        require_uppercase: policy.require_uppercase,
+        require_lowercase: policy.require_lowercase,
+        require_digit: policy.require_digit,
+        require_symbol: policy.require_symbol,
+    }))
+}
+
+/// 更新密码策略配置。
+pub async fn update_password_policy(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<PasswordPolicyRequest>,
+) -> Result<Json<PasswordPolicyResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "admin")?;
+    if payload.min_length < 4 || payload.min_length > 64 {
+        return Err(AppError::validation("invalid min_length"));
+    }
+    let policy = crate::config::PasswordPolicy {
+        min_length: payload.min_length,
+        require_uppercase: payload.require_uppercase,
+        require_lowercase: payload.require_lowercase,
+        require_digit: payload.require_digit,
+        require_symbol: payload.require_symbol,
+    };
+    let updated = upsert_password_policy(&state, policy).await?;
+    Ok(Json(PasswordPolicyResponse {
+        min_length: updated.min_length,
+        require_uppercase: updated.require_uppercase,
+        require_lowercase: updated.require_lowercase,
+        require_digit: updated.require_digit,
+        require_symbol: updated.require_symbol,
+    }))
+}
+
+/// 为用户发送 TOTP 重置链接。
+pub async fn reset_user_totp(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<ResetUserRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let admin = require_session_user(&state, &jar).await?;
+    require_role(&admin, "admin")?;
+
+    let user = User::find()
+        .filter(users::Column::Username.eq(payload.username))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+    if user.role == "student" {
+        return Err(AppError::bad_request("student reset via email"));
+    }
+    let email = user.email.ok_or_else(|| AppError::bad_request("email not set"))?;
+    let base_url = state
+        .config
+        .base_url
+        .as_ref()
+        .ok_or_else(|| AppError::config("BASE_URL is required"))?;
+    let mail_config = state
+        .config
+        .mail
+        .as_ref()
+        .ok_or_else(|| AppError::config("mail config required"))?;
+
+    let token = generate_token();
+    let token_hash = hash_token(&token);
+    let now = Utc::now();
+    let expires_at = now + ChronoDuration::minutes(RESET_TTL_MINUTES);
+    let reset = auth_resets::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        token_hash: Set(token_hash),
+        user_id: Set(user.id),
+        purpose: Set("totp".to_string()),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+        used_at: Set(None),
+    };
+    auth_resets::Entity::insert(reset)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let link = format!("{}/reset?token={}", base_url, token);
+    let body = format!(
+        "您好，\n\n请点击以下链接重置您的 TOTP：\n{}\n\n该链接 {} 分钟后失效。",
+        link, RESET_TTL_MINUTES
+    );
+    send_mail(mail_config, &email, "TOTP 重置", &body).await?;
+    Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+/// 为用户发送 Passkey 重置链接。
+pub async fn reset_user_passkey(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(payload): Json<ResetUserRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let admin = require_session_user(&state, &jar).await?;
+    require_role(&admin, "admin")?;
+
+    let user = User::find()
+        .filter(users::Column::Username.eq(payload.username))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("user not found"))?;
+    if user.role == "student" {
+        return Err(AppError::bad_request("student reset via email"));
+    }
+    let email = user.email.ok_or_else(|| AppError::bad_request("email not set"))?;
+    let base_url = state
+        .config
+        .base_url
+        .as_ref()
+        .ok_or_else(|| AppError::config("BASE_URL is required"))?;
+    let mail_config = state
+        .config
+        .mail
+        .as_ref()
+        .ok_or_else(|| AppError::config("mail config required"))?;
+
+    let token = generate_token();
+    let token_hash = hash_token(&token);
+    let now = Utc::now();
+    let expires_at = now + ChronoDuration::minutes(RESET_TTL_MINUTES);
+    let reset = auth_resets::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        token_hash: Set(token_hash),
+        user_id: Set(user.id),
+        purpose: Set("passkey".to_string()),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+        used_at: Set(None),
+    };
+    auth_resets::Entity::insert(reset)
+        .exec_without_returning(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+
+    let link = format!("{}/reset?token={}", base_url, token);
+    let body = format!(
+        "您好，\n\n请点击以下链接重置您的 Passkey：\n{}\n\n该链接 {} 分钟后失效。",
+        link, RESET_TTL_MINUTES
+    );
+    send_mail(mail_config, &email, "Passkey 重置", &body).await?;
+    Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
 /// 从 Excel 导入竞赛名称（仅管理员）。

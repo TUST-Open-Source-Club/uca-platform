@@ -1,20 +1,17 @@
-//! 用户账户。
+//! 密码策略配置。
 
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "password_policies")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub username: String,
-    pub display_name: String,
-    pub role: String,
-    pub email: Option<String>,
-    pub password_hash: Option<String>,
-    pub allow_password_login: bool,
-    pub password_updated_at: Option<DateTimeUtc>,
-    pub is_active: bool,
+    pub min_length: i32,
+    pub require_uppercase: bool,
+    pub require_lowercase: bool,
+    pub require_digit: bool,
+    pub require_symbol: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

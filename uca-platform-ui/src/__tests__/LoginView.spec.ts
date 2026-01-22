@@ -15,7 +15,10 @@ describe('LoginView', () => {
     setActivePinia(pinia)
     const router = createRouter({
       history: createWebHistory(),
-      routes: [{ path: '/', component: { template: '<div />' } }],
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/password-reset/request', component: { template: '<div />' } },
+      ],
     })
     const ElTableStub = defineComponent({
       props: ['data'],

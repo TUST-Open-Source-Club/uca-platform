@@ -2,12 +2,34 @@ type PublicKeyRequestInput = {
   publicKey?: PublicKeyCredentialRequestOptions
 } & PublicKeyCredentialRequestOptions
 
+type PublicKeyCreationInput = {
+  publicKey?: PublicKeyCredentialCreationOptions
+} & PublicKeyCredentialCreationOptions
+
 export function normalizeRequestOptions(input: PublicKeyRequestInput): PublicKeyCredentialRequestOptions {
   const options = (input.publicKey ?? input) as PublicKeyCredentialRequestOptions
   return {
     ...options,
     challenge: toArrayBuffer(options.challenge),
     allowCredentials: options.allowCredentials?.map((cred) => ({
+      ...cred,
+      id: toArrayBuffer(cred.id),
+    })),
+  }
+}
+
+export function normalizeCreationOptions(
+  input: PublicKeyCreationInput,
+): PublicKeyCredentialCreationOptions {
+  const options = (input.publicKey ?? input) as PublicKeyCredentialCreationOptions
+  return {
+    ...options,
+    challenge: toArrayBuffer(options.challenge),
+    user: {
+      ...options.user,
+      id: toArrayBuffer(options.user.id),
+    },
+    excludeCredentials: options.excludeCredentials?.map((cred) => ({
       ...cred,
       id: toArrayBuffer(cred.id),
     })),
@@ -25,6 +47,20 @@ export function credentialToJson(credential: PublicKeyCredential) {
       clientDataJSON: bufferToBase64Url(response.clientDataJSON),
       signature: bufferToBase64Url(response.signature),
       userHandle: response.userHandle ? bufferToBase64Url(response.userHandle) : null,
+    },
+    clientExtensionResults: credential.getClientExtensionResults(),
+  }
+}
+
+export function registrationCredentialToJson(credential: PublicKeyCredential) {
+  const response = credential.response as AuthenticatorAttestationResponse
+  return {
+    id: credential.id,
+    rawId: bufferToBase64Url(credential.rawId),
+    type: credential.type,
+    response: {
+      attestationObject: bufferToBase64Url(response.attestationObject),
+      clientDataJSON: bufferToBase64Url(response.clientDataJSON),
     },
     clientExtensionResults: credential.getClientExtensionResults(),
   }

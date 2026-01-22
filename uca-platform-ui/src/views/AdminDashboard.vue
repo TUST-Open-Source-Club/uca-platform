@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { UploadFile } from 'element-plus'
 import {
   createCompetition,
+  createUser,
   createFormField,
   deleteContestRecord,
   deleteStudent,
   deleteVolunteerRecord,
+  getPasswordPolicy,
   importCompetitions,
   importContestRecords,
   importVolunteerRecords,
   listCompetitions,
   listFormFields,
+  resetUserPasskey,
+  resetUserTotp,
+  updatePasswordPolicy,
 } from '../api/admin'
 import { importStudents, queryStudents } from '../api/students'
 import { queryContest, queryVolunteer } from '../api/records'
@@ -24,6 +29,7 @@ const importFormRef = ref()
 const competitionImportRef = ref()
 const volunteerImportRef = ref()
 const contestImportRef = ref()
+const userFormRef = ref()
 const competitions = ref('')
 const formFields = ref('')
 const students = ref<any[]>([])
@@ -43,6 +49,9 @@ const contestImportRequest = useRequest()
 const listRequest = useRequest()
 const deleteRequest = useRequest()
 const listDataRequest = useRequest()
+const userRequest = useRequest()
+const policyRequest = useRequest()
+const resetRequest = useRequest()
 const router = useRouter()
 
 const competitionForm = reactive({
@@ -74,6 +83,26 @@ const contestImportForm = reactive({
   fileName: '',
 })
 
+const userForm = reactive({
+  username: '',
+  display_name: '',
+  role: 'student',
+  email: '',
+})
+
+const passwordPolicyForm = reactive({
+  min_length: 8,
+  require_uppercase: false,
+  require_lowercase: false,
+  require_digit: true,
+  require_symbol: false,
+})
+
+const resetForm = reactive({
+  username: '',
+  method: 'totp',
+})
+
 const competitionRules = {
   name: [{ required: true, message: '请输入竞赛名称', trigger: 'blur' }],
 }
@@ -101,6 +130,39 @@ const volunteerImportRules = {
 const contestImportRules = {
   fileName: [{ required: true, message: '请选择竞赛获奖导入文件', trigger: 'change' }],
 }
+
+const userRules = {
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  display_name: [{ required: true, message: '请输入显示名称', trigger: 'blur' }],
+  role: [{ required: true, message: '请选择角色', trigger: 'change' }],
+  email: [
+    {
+      validator: (_rule: unknown, value: string, callback: (err?: Error) => void) => {
+        if (userForm.role !== 'student' && !value) {
+          callback(new Error('非学生必须填写邮箱'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+}
+
+const loadPasswordPolicy = async () => {
+  await policyRequest.run(async () => {
+    const data = await getPasswordPolicy()
+    passwordPolicyForm.min_length = data.min_length
+    passwordPolicyForm.require_uppercase = data.require_uppercase
+    passwordPolicyForm.require_lowercase = data.require_lowercase
+    passwordPolicyForm.require_digit = data.require_digit
+    passwordPolicyForm.require_symbol = data.require_symbol
+  }, { silent: true })
+}
+
+onMounted(() => {
+  void loadPasswordPolicy()
+})
 
 const loadCompetitions = async () => {
   await listRequest.run(async () => {
@@ -249,6 +311,46 @@ const handleDeleteContestRecord = async (recordId: string) => {
 
 const handleOpenPurge = async () => {
   await router.push('/purge')
+}
+
+const handleCreateUser = async () => {
+  if (!userFormRef.value) return
+  await userFormRef.value.validate(async (valid: boolean) => {
+    if (!valid) return
+    await userRequest.run(async () => {
+      const payload = {
+        username: userForm.username,
+        display_name: userForm.display_name,
+        role: userForm.role as 'student' | 'teacher' | 'reviewer' | 'admin',
+        email: userForm.email || undefined,
+      }
+      const data = await createUser(payload)
+      result.value = JSON.stringify(data, null, 2)
+    }, { successMessage: '已提交用户创建' })
+  })
+}
+
+const handleUpdatePolicy = async () => {
+  await policyRequest.run(async () => {
+    const data = await updatePasswordPolicy({
+      min_length: passwordPolicyForm.min_length,
+      require_uppercase: passwordPolicyForm.require_uppercase,
+      require_lowercase: passwordPolicyForm.require_lowercase,
+      require_digit: passwordPolicyForm.require_digit,
+      require_symbol: passwordPolicyForm.require_symbol,
+    })
+    result.value = JSON.stringify(data, null, 2)
+  }, { successMessage: '密码策略已更新' })
+}
+
+const handleResetAuth = async () => {
+  await resetRequest.run(async () => {
+    if (resetForm.method === 'totp') {
+      await resetUserTotp(resetForm.username)
+    } else {
+      await resetUserPasskey(resetForm.username)
+    }
+  }, { successMessage: '重置链接已发送' })
 }
 </script>
 
@@ -473,6 +575,86 @@ const handleOpenPurge = async () => {
         </el-table-column>
       </el-table>
     </el-card>
+
+    <el-card class="card">
+      <h3>创建用户 / 发送邀请</h3>
+      <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-position="top">
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model="userForm.username" placeholder="学号或工号" />
+        </el-form-item>
+        <el-form-item label="显示名称" prop="display_name">
+          <el-input v-model="userForm.display_name" placeholder="姓名" />
+        </el-form-item>
+        <el-form-item label="角色" prop="role">
+          <el-select v-model="userForm.role">
+            <el-option label="学生" value="student" />
+            <el-option label="教师" value="teacher" />
+            <el-option label="审核员" value="reviewer" />
+            <el-option label="管理员" value="admin" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="邮箱（非学生必填）" prop="email">
+          <el-input v-model="userForm.email" placeholder="user@example.com" />
+        </el-form-item>
+        <el-button type="primary" :loading="userRequest.loading" @click="handleCreateUser">
+          提交
+        </el-button>
+      </el-form>
+    </el-card>
+
+    <el-card class="card">
+      <h3>密码策略</h3>
+      <el-form :model="passwordPolicyForm" label-position="top">
+        <el-form-item label="最小长度">
+          <el-input-number v-model="passwordPolicyForm.min_length" :min="4" :max="64" />
+        </el-form-item>
+        <el-form-item label="包含大写字母">
+          <el-select v-model="passwordPolicyForm.require_uppercase">
+            <el-option label="否" :value="false" />
+            <el-option label="是" :value="true" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="包含小写字母">
+          <el-select v-model="passwordPolicyForm.require_lowercase">
+            <el-option label="否" :value="false" />
+            <el-option label="是" :value="true" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="包含数字">
+          <el-select v-model="passwordPolicyForm.require_digit">
+            <el-option label="否" :value="false" />
+            <el-option label="是" :value="true" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="包含特殊符号">
+          <el-select v-model="passwordPolicyForm.require_symbol">
+            <el-option label="否" :value="false" />
+            <el-option label="是" :value="true" />
+          </el-select>
+        </el-form-item>
+        <el-button type="primary" :loading="policyRequest.loading" @click="handleUpdatePolicy">
+          保存策略
+        </el-button>
+      </el-form>
+    </el-card>
+
+    <el-card class="card">
+      <h3>认证重置（非学生）</h3>
+      <el-form :model="resetForm" label-position="top">
+        <el-form-item label="用户名">
+          <el-input v-model="resetForm.username" placeholder="工号" />
+        </el-form-item>
+        <el-form-item label="重置方式">
+          <el-select v-model="resetForm.method">
+            <el-option label="TOTP" value="totp" />
+            <el-option label="Passkey" value="passkey" />
+          </el-select>
+        </el-form-item>
+        <el-button type="primary" :loading="resetRequest.loading" @click="handleResetAuth">
+          发送重置链接
+        </el-button>
+      </el-form>
+    </el-card>
   </div>
 
   <el-alert
@@ -485,7 +667,10 @@ const handleOpenPurge = async () => {
       volunteerImportRequest.error ||
       contestImportRequest.error ||
       deleteRequest.error ||
-      listDataRequest.error
+      listDataRequest.error ||
+      userRequest.error ||
+      policyRequest.error ||
+      resetRequest.error
     "
     class="card"
     style="margin-top: 24px"
@@ -500,7 +685,10 @@ const handleOpenPurge = async () => {
       volunteerImportRequest.error ||
       contestImportRequest.error ||
       deleteRequest.error ||
-      listDataRequest.error
+      listDataRequest.error ||
+      userRequest.error ||
+      policyRequest.error ||
+      resetRequest.error
     "
     :closable="false"
   />

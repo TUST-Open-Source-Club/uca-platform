@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { listCompetitionsPublic } from '../api/catalog'
 import { createContest, createVolunteer } from '../api/records'
+import { bindEmail, changePassword } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
 import { useRequest } from '../composables/useRequest'
 
@@ -11,6 +12,7 @@ const result = ref('')
 const volunteerRequest = useRequest()
 const contestRequest = useRequest()
 const fieldRequest = useRequest()
+const accountRequest = useRequest()
 
 const volunteerFields = ref<FormField[]>([])
 const contestFields = ref<FormField[]>([])
@@ -27,6 +29,19 @@ const contestForm = reactive<Record<string, string | number>>({
   award_level: '',
   self_hours: 0,
 })
+
+const accountFormRef = ref()
+const accountForm = reactive({
+  email: '',
+  current_password: '',
+  new_password: '',
+})
+
+const accountRules = {
+  email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
+  current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
+  new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }],
+}
 
 const validateHours = (_: unknown, value: number, callback: (error?: Error) => void) => {
   if (Number(value) <= 0) {
@@ -140,6 +155,29 @@ const handleContestSubmit = async () => {
     )
   })
 }
+
+const handleBindEmail = async () => {
+  if (!accountFormRef.value) return
+  await accountFormRef.value.validateField('email', async (valid: boolean) => {
+    if (!valid) return
+    await accountRequest.run(async () => {
+      await bindEmail(accountForm.email)
+    }, { successMessage: '邮箱已绑定' })
+  })
+}
+
+const handleChangePassword = async () => {
+  if (!accountFormRef.value) return
+  await accountFormRef.value.validate(async (valid: boolean) => {
+    if (!valid) return
+    await accountRequest.run(async () => {
+      await changePassword({
+        current_password: accountForm.current_password,
+        new_password: accountForm.new_password,
+      })
+    }, { successMessage: '密码已更新' })
+  })
+}
 </script>
 
 <template>
@@ -220,6 +258,28 @@ const handleContestSubmit = async () => {
         </el-button>
       </el-form>
     </el-card>
+
+    <el-card class="card">
+      <h3>账户安全</h3>
+      <el-form ref="accountFormRef" :model="accountForm" :rules="accountRules" label-position="top">
+        <el-form-item label="绑定邮箱" prop="email">
+          <el-input v-model="accountForm.email" placeholder="用于重置密码" />
+        </el-form-item>
+        <el-button :loading="accountRequest.loading" @click="handleBindEmail">绑定邮箱</el-button>
+
+        <el-divider style="margin: 16px 0" />
+
+        <el-form-item label="当前密码" prop="current_password">
+          <el-input v-model="accountForm.current_password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="新密码" prop="new_password">
+          <el-input v-model="accountForm.new_password" type="password" show-password />
+        </el-form-item>
+        <el-button type="primary" :loading="accountRequest.loading" @click="handleChangePassword">
+          修改密码
+        </el-button>
+      </el-form>
+    </el-card>
   </div>
 
   <el-card v-if="result" class="card" style="margin-top: 24px">
@@ -227,12 +287,12 @@ const handleContestSubmit = async () => {
   </el-card>
 
   <el-alert
-    v-if="volunteerRequest.error || contestRequest.error || fieldRequest.error"
+    v-if="volunteerRequest.error || contestRequest.error || fieldRequest.error || accountRequest.error"
     class="card"
     style="margin-top: 16px"
     type="error"
     show-icon
-    :title="volunteerRequest.error || contestRequest.error || fieldRequest.error"
+    :title="volunteerRequest.error || contestRequest.error || fieldRequest.error || accountRequest.error"
     :closable="false"
   />
 </template>

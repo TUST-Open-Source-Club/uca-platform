@@ -1,4 +1,7 @@
-/uca-platform-server/data/
-/uca-platform-server/target/
-/uca-platform-ui/node_modules/
-/uca-platform-ui/dist/
+uca-platform-server/data/
+uca-platform-server/target/
+uca-platform-ui/node_modules/
+uca-platform-ui/dist/
+data/
+config.toml
+uca-platform-server/config.toml

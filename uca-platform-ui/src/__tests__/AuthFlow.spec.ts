@@ -17,6 +17,8 @@ const passkeyStart = vi.fn()
 const passkeyFinish = vi.fn()
 const totpVerify = vi.fn()
 const recoveryVerify = vi.fn()
+const passwordLogin = vi.fn()
+const loginOptions = vi.fn()
 const getCurrentUser = vi.fn()
 
 vi.mock('../api/auth', () => ({
@@ -24,7 +26,10 @@ vi.mock('../api/auth', () => ({
   passkeyFinish: (...args: unknown[]) => passkeyFinish(...args),
   totpVerify: (...args: unknown[]) => totpVerify(...args),
   recoveryVerify: (...args: unknown[]) => recoveryVerify(...args),
+  passwordLogin: (...args: unknown[]) => passwordLogin(...args),
+  loginOptions: (...args: unknown[]) => loginOptions(...args),
   getCurrentUser: (...args: unknown[]) => getCurrentUser(...args),
+  bootstrapStatus: vi.fn().mockResolvedValue({ ready: true, needs_totp: false }),
 }))
 
 vi.mock('../api/catalog', () => ({
@@ -67,6 +72,7 @@ const buildRouter = () =>
       { path: '/student', component: { template: '<div />' } },
       { path: '/review', component: { template: '<div />' } },
       { path: '/admin', component: { template: '<div />' } },
+      { path: '/password-reset/request', component: { template: '<div />' } },
     ],
   })
 
@@ -75,6 +81,8 @@ beforeEach(() => {
   passkeyFinish.mockReset()
   totpVerify.mockReset()
   recoveryVerify.mockReset()
+  passwordLogin.mockReset()
+  loginOptions.mockResolvedValue({ methods: ['passkey', 'totp', 'recovery', 'password'] })
   getCurrentUser.mockReset()
   const pinia = createPinia()
   setActivePinia(pinia)

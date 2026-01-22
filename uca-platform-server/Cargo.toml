@@ -16,6 +16,7 @@ calamine = "0.24"
 chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
 image = "0.24"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
 mime_guess = "2"
 printpdf = { version = "0.7", features = ["embedded_images"] }
 rand = "0.8"
@@ -29,6 +30,7 @@ sha2 = "0.10"
 thiserror = "2"
 time = { version = "0.3", features = ["serde", "macros"] }
 tokio = { version = "1", features = ["full"] }
+toml = "0.8"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }

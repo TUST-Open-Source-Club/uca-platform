@@ -49,8 +49,16 @@
 { "status": "ok" }
 ```
 
+### GET /auth/bootstrap/status
+获取初始化状态（无需登录）。
+
+响应：
+```json
+{ "ready": true, "needs_totp": false }
+```
+
 ### POST /auth/bootstrap
-创建初始管理员用户，仅在系统无用户时允许。若配置了 `BOOTSTRAP_TOKEN`，必须提供。
+创建初始管理员用户，仅在系统无用户时允许。若配置了 `BOOTSTRAP_TOKEN`，必须提供。成功后会写入会话 Cookie，用于在初始化阶段绑定 TOTP。
 
 请求：
 ```json
@@ -66,8 +74,24 @@
 { "user_id": "<uuid>" }
 ```
 
+说明：
+- 返回会话 Cookie（`Set-Cookie`），用于调用 `/auth/totp/enroll/start` 与 `/auth/totp/enroll/finish` 完成 TOTP 绑定。
+
+### GET /auth/login/options
+获取用户允许的登录方式（无需登录）。
+
+请求：
+```
+/auth/login/options?username=20231234
+```
+
+响应：
+```json
+{ "methods": ["passkey", "totp", "recovery", "password"] }
+```
+
 ### POST /auth/passkey/register/start
-为已有用户发起 Passkey 注册。
+为已有用户发起 Passkey 注册（需要会话 Cookie，且用户名必须与当前会话一致）。
 
 请求：
 ```json
@@ -90,7 +114,7 @@
 {
   "session_id": "<uuid>",
   "credential": { /* RegisterPublicKeyCredential */ },
-  "device_label": "我的设备"
+  "device_label": "我的设备（可选）"
 }
 ```
 
@@ -124,6 +148,19 @@
   "session_id": "<uuid>",
   "credential": { /* PublicKeyCredential */ }
 }
+```
+
+响应：
+```json
+{ "user_id": "<uuid>" }
+```
+
+### POST /auth/password/login
+学生密码登录（仅学生）。
+
+请求：
+```json
+{ "username": "20231234", "password": "st20231234" }
 ```
 
 响应：
@@ -206,6 +243,117 @@
 响应：
 ```json
 { "user_id": "<uuid>" }
+```
+
+### POST /auth/email/bind
+学生绑定邮箱（需要会话 Cookie）。
+
+请求：
+```json
+{ "email": "student@example.com" }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /auth/password/change
+学生修改密码（需要会话 Cookie）。
+
+请求：
+```json
+{ "current_password": "st20231234", "new_password": "NewPass123" }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /auth/password/reset/request
+学生发起密码重置邮件（无需登录，需先绑定邮箱）。
+
+请求：
+```json
+{ "username": "20231234" }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /auth/password/reset/confirm
+完成学生密码重置（无需登录）。
+
+请求：
+```json
+{ "token": "<reset-token>", "new_password": "NewPass123" }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### GET /auth/invite/status
+查询邀请状态（无需登录）。
+
+请求：
+```
+/auth/invite/status?token=<invite-token>
+```
+
+响应：
+```json
+{
+  "valid": true,
+  "email": "user@example.com",
+  "username": "teacher001",
+  "display_name": "李老师",
+  "role": "teacher",
+  "expires_at": "2025-02-12T08:00:00Z"
+}
+```
+
+### POST /auth/invite/accept
+接受邀请并创建用户（无需登录，成功后写入会话 Cookie）。
+
+请求：
+```json
+{ "token": "<invite-token>" }
+```
+
+响应：
+```json
+{ "user_id": "<uuid>", "username": "teacher001", "role": "teacher" }
+```
+
+### GET /auth/reset/status
+查询认证重置令牌状态（无需登录）。
+
+请求：
+```
+/auth/reset/status?token=<reset-token>
+```
+
+响应：
+```json
+{ "valid": true, "purpose": "totp" }
+```
+
+### POST /auth/reset/consume
+消费认证重置令牌并清理认证数据（无需登录，成功后写入会话 Cookie）。
+
+请求：
+```json
+{ "token": "<reset-token>" }
+```
+
+响应：
+```json
+{ "user_id": "<uuid>", "purpose": "totp" }
 ```
 
 ### POST /auth/recovery/regenerate
@@ -513,6 +661,93 @@ student_no | name | gender | department | major | class_name | phone | self_hour
 [
   { "id": "<uuid>", "name": "全国大学生数学建模竞赛" }
 ]
+```
+
+### POST /admin/users
+管理员创建用户或发送邀请（需会话 Cookie）。
+
+说明：
+- 角色为 `student` 时直接创建用户并设置默认密码 `st+学号`。
+- 其他角色必须提供邮箱，系统发送邀请邮件。
+
+请求：
+```json
+{
+  "username": "teacher001",
+  "display_name": "李老师",
+  "role": "teacher",
+  "email": "teacher@example.com"
+}
+```
+
+响应：
+```json
+{ "user_id": null, "invite_sent": true }
+```
+
+### GET /admin/password-policy
+获取密码策略（需会话 Cookie）。
+
+响应：
+```json
+{
+  "min_length": 8,
+  "require_uppercase": false,
+  "require_lowercase": false,
+  "require_digit": true,
+  "require_symbol": false
+}
+```
+
+### POST /admin/password-policy
+更新密码策略（需会话 Cookie）。
+
+请求：
+```json
+{
+  "min_length": 8,
+  "require_uppercase": false,
+  "require_lowercase": false,
+  "require_digit": true,
+  "require_symbol": false
+}
+```
+
+响应：
+```json
+{
+  "min_length": 8,
+  "require_uppercase": false,
+  "require_lowercase": false,
+  "require_digit": true,
+  "require_symbol": false
+}
+```
+
+### POST /admin/users/reset/totp
+发送 TOTP 重置链接（仅非学生，需会话 Cookie）。
+
+请求：
+```json
+{ "username": "teacher001" }
+```
+
+响应：
+```json
+{ "status": "ok" }
+```
+
+### POST /admin/users/reset/passkey
+发送 Passkey 重置链接（仅非学生，需会话 Cookie）。
+
+请求：
+```json
+{ "username": "teacher001" }
+```
+
+响应：
+```json
+{ "status": "ok" }
 ```
 
 ### GET /admin/competitions

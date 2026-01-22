@@ -75,3 +75,58 @@ export async function purgeVolunteerRecord(recordId: string): Promise<unknown> {
 export async function purgeContestRecord(recordId: string): Promise<unknown> {
   return requestJson(`/admin/purge/records/contest/${recordId}`, { method: 'DELETE' })
 }
+
+export async function createUser(payload: {
+  username: string
+  display_name: string
+  role: 'student' | 'teacher' | 'reviewer' | 'admin'
+  email?: string
+}): Promise<{ user_id?: string; invite_sent: boolean }> {
+  return requestJson('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getPasswordPolicy(): Promise<{
+  min_length: number
+  require_uppercase: boolean
+  require_lowercase: boolean
+  require_digit: boolean
+  require_symbol: boolean
+}> {
+  return requestJson('/admin/password-policy', { method: 'GET' })
+}
+
+export async function updatePasswordPolicy(payload: {
+  min_length: number
+  require_uppercase: boolean
+  require_lowercase: boolean
+  require_digit: boolean
+  require_symbol: boolean
+}): Promise<{
+  min_length: number
+  require_uppercase: boolean
+  require_lowercase: boolean
+  require_digit: boolean
+  require_symbol: boolean
+}> {
+  return requestJson('/admin/password-policy', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function resetUserTotp(username: string): Promise<{ status: string }> {
+  return requestJson('/admin/users/reset/totp', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  })
+}
+
+export async function resetUserPasskey(username: string): Promise<{ status: string }> {
+  return requestJson('/admin/users/reset/passkey', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  })
+}

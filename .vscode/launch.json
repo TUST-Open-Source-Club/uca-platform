@@ -6,9 +6,9 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["run"],
-        "cwd": "${workspaceFolder}/uca-platform-server"
+        "args": ["run", "--manifest-path", "uca-platform-server/Cargo.toml"]
       },
+      "preLaunchTask": "ui: dev",
       "env": {
         "DEVELOPER_MODE": "true",
         "ALLOW_HTTP": "true",

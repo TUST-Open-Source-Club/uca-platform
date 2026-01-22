@@ -4,7 +4,7 @@ use aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use base64::Engine;
-use rand::{rngs::OsRng, RngCore};
+use rand::{distributions::Alphanumeric, rngs::OsRng, Rng, RngCore};
 use sha2::{Digest, Sha256};
 use totp_rs::{Algorithm, Secret, TOTP};
 use uuid::Uuid;
@@ -66,6 +66,41 @@ pub fn verify_recovery_code(code: &str, hash: &str) -> Result<bool, AppError> {
         .map_err(|_| AppError::internal("invalid recovery code hash"))?;
     Ok(Argon2::default()
         .verify_password(code.as_bytes(), &parsed)
+        .is_ok())
+}
+
+/// 生成随机令牌（URL 友好）。
+pub fn generate_token() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(40)
+        .map(char::from)
+        .collect()
+}
+
+/// 计算令牌哈希（SHA-256 + HEX）。
+pub fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// 使用 Argon2 哈希密码。
+pub fn hash_password(password: &str) -> Result<String, AppError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|_| AppError::internal("failed to hash password"))
+}
+
+/// 校验密码哈希。
+pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
+    let parsed = PasswordHash::new(hash)
+        .map_err(|_| AppError::internal("invalid password hash"))?;
+    Ok(Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
         .is_ok())
 }
 

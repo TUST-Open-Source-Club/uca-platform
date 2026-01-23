@@ -7,42 +7,50 @@
 ### 1. 准备镜像
 
 项目已提供 GHCR 镜像：
-- `ghcr.io/mike-solar/uca-platform-server:latest`
-- `ghcr.io/mike-solar/uca-platform-ui:latest`
+- `ghcr.io/tust-open-source-club/uca-platform/uca-platform-server:latest`
+- `ghcr.io/tust-open-source-club/uca-platform/uca-platform-ui:latest`
 
 如需自行构建：
 ```bash
 docker compose build
 ```
+### 2. 关键环境变量和文件
 
-### 2. 启动服务
+`docker-compose.yml` 内已改为占位符，请使用脚本生成密钥：
+```bash
+bash scripts/generate-keys.sh
+```
+将输出填入 `docker-compose.yml` 或 `.env`：
+- `AUTH_SECRET_KEY`：Base64 的 32 字节密钥
+- `TLS_KEY_ENC_KEY`：Base64 的 32 字节密钥
 
+下面的字符串不能通过.env设置：
+- `RP_ID` / `RP_ORIGIN` / `BASE_URL`：与部署域名一致
+- `DATABASE_URL`：生产数据库连接串
+
+拷贝deploy/nginx.conf到部署目录的deploy.nginx.conf
+### 3. 启动服务
+
+拷贝
 ```bash
 docker compose up -d
 ```
 
 默认对外端口：`http://localhost:8080`（由 Nginx 反代到前后端）。
 
-### 3. 首次初始化
+### 4. 首次初始化
 
 1. 打开 `http://localhost:8080`，进入初始化向导。
 2. 初始化管理员需绑定 TOTP（系统要求首次初始化完成二次认证配置）。
 3. 按界面提示完成后即可进入系统。
 
-### 4. 数据库与存储
+### 5. 数据库与存储
 
 默认使用 PostgreSQL（容器 `uca-postgres`）。
 数据卷：
 - `postgres_data`：数据库数据
 - `server_data`：后端上传文件/签名/证书等
 
-### 5. 关键环境变量（务必修改）
-
-`docker-compose.yml` 内含默认演示配置，请在生产环境中修改以下变量：
-- `AUTH_SECRET_KEY`：Base64 的 32 字节密钥
-- `TLS_KEY_ENC_KEY`：Base64 的 32 字节密钥
-- `RP_ID` / `RP_ORIGIN` / `BASE_URL`：与部署域名一致
-- `DATABASE_URL`：生产数据库连接串
 
 ### 6. HTTPS
 

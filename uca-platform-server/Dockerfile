@@ -19,7 +19,7 @@ COPY --from=build /usr/lib/libreoffice /usr/lib/libreoffice
 COPY --from=build /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
 COPY --from=build /lib/x86_64-linux-gnu /lib/x86_64-linux-gnu
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /data /data
+COPY --from=build --chown=nonroot:nonroot /data /data
 
 ENV LIBREOFFICE_PATH=/usr/bin/soffice
 EXPOSE 8443

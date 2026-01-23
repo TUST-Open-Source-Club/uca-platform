@@ -189,6 +189,7 @@ async fn create_user(state: &AppState, username: &str, role: &str) -> users::Mod
         password_hash: Set(None),
         allow_password_login: Set(false),
         password_updated_at: Set(None),
+        must_change_password: Set(false),
         is_active: Set(true),
         created_at: Set(now),
         updated_at: Set(now),
@@ -261,6 +262,20 @@ fn json_request(method: &str, path: &str, body: serde_json::Value) -> Request<Bo
 }
 
 fn multipart_request(path: &str, filename: &str, bytes: Vec<u8>) -> Request<Body> {
+    multipart_request_with_type(
+        path,
+        filename,
+        bytes,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+}
+
+fn multipart_request_with_type(
+    path: &str,
+    filename: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> Request<Body> {
     let boundary = "----volunteerhoursboundary";
     let mut body = Vec::new();
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
@@ -271,7 +286,7 @@ fn multipart_request(path: &str, filename: &str, bytes: Vec<u8>) -> Request<Body
         .as_bytes(),
     );
     body.extend_from_slice(
-        b"Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n",
+        format!("Content-Type: {content_type}\r\n\r\n").as_bytes(),
     );
     body.extend_from_slice(&bytes);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
@@ -654,10 +669,11 @@ async fn upload_attachments_and_signatures() {
         .unwrap()
         .unwrap();
 
-    let attachment = multipart_request(
+    let attachment = multipart_request_with_type(
         &format!("/attachments/contest/{}", record.id),
-        "proof.txt",
+        "proof.pdf",
         b"test".to_vec(),
+        "application/pdf",
     )
     .with_cookie(&student_cookie);
     let response = ctx.app.clone().oneshot(attachment).await.unwrap();

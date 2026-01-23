@@ -2,7 +2,7 @@
 
 use axum::{extract::State, Json, extract::Path};
 use axum_extra::extract::cookie::CookieJar;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
     Set,
@@ -15,8 +15,8 @@ use validator::Validate;
 use crate::{
     access::{require_role, require_session_user},
     entities::{
-        competition_library, contest_records, form_field_values, form_fields, students,
-        CompetitionLibrary, ContestRecord, FormField, FormFieldValue, Student,
+        attachments, competition_library, contest_records, form_field_values, form_fields, students,
+        Attachment, CompetitionLibrary, ContestRecord, FormField, FormFieldValue, Student,
     },
     error::AppError,
     labor_hours::{compute_recommended_hours, load_labor_hour_rules},
@@ -63,6 +63,16 @@ pub struct ContestRecordResponse {
     pub id: Uuid,
     /// 学生 ID。
     pub student_id: Uuid,
+    /// 学号。
+    pub student_no: Option<String>,
+    /// 学生姓名。
+    pub student_name: Option<String>,
+    /// 学院。
+    pub department: Option<String>,
+    /// 专业。
+    pub major: Option<String>,
+    /// 班级。
+    pub class_name: Option<String>,
     /// 竞赛名称。
     pub contest_name: String,
     /// 竞赛年份。
@@ -93,6 +103,21 @@ pub struct ContestRecordResponse {
     pub recommended_hours: i32,
     /// 自定义字段。
     pub custom_fields: Vec<CustomFieldValueResponse>,
+    /// 附件列表。
+    pub attachments: Vec<AttachmentInfo>,
+}
+
+/// 附件信息。
+#[derive(Clone, Debug, Serialize)]
+pub struct AttachmentInfo {
+    /// 附件 ID。
+    pub id: Uuid,
+    /// 原始文件名。
+    pub original_name: String,
+    /// MIME 类型。
+    pub mime_type: String,
+    /// 下载地址。
+    pub download_url: String,
 }
 
 /// 自定义字段响应。
@@ -208,6 +233,7 @@ pub async fn create_contest_record(
     let model_id = id;
     insert_custom_fields(&state, "contest", model_id, &form_fields, &custom_fields).await?;
     let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
+    let attachments = Vec::new();
     let model = contest_records::Model {
         id,
         student_id: student.id,
@@ -234,6 +260,8 @@ pub async fn create_contest_record(
         &match_status,
         recommended_hours,
         custom_values.get(&model_id).cloned().unwrap_or_default(),
+        Some(&student),
+        attachments,
     )))
 }
 
@@ -275,6 +303,9 @@ pub async fn list_contest_records(
     let form_fields = load_form_fields(&state, "contest").await?;
     let ids: Vec<Uuid> = records.iter().map(|record| record.id).collect();
     let custom_values = fetch_custom_fields(&state, "contest", &ids, &form_fields).await?;
+    let student_ids: Vec<Uuid> = records.iter().map(|record| record.student_id).collect();
+    let students_map = load_students_map(&state, &student_ids).await?;
+    let attachments_map = load_attachments_map(&state, "contest", &ids).await?;
 
     let rule_config = load_labor_hour_rules(&state).await?;
     let mut responses = Vec::with_capacity(records.len());
@@ -287,11 +318,18 @@ pub async fn list_contest_records(
             record.contest_role.as_deref(),
         );
         let values = custom_values.get(&record.id).cloned().unwrap_or_default();
+        let student = students_map.get(&record.student_id);
+        let attachments = attachments_map
+            .get(&record.id)
+            .cloned()
+            .unwrap_or_default();
         responses.push(model_to_contest_response(
             record,
             &match_status,
             recommended_hours,
             values,
+            student,
+            attachments,
         ));
     }
 
@@ -346,11 +384,22 @@ pub async fn review_contest_record(
     let form_fields = load_form_fields(&state, "contest").await?;
     let model_id = model.id;
     let custom_values = fetch_custom_fields(&state, "contest", &[model_id], &form_fields).await?;
+    let student = Student::find_by_id(model.student_id)
+        .filter(students::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    let attachments = load_attachments_map(&state, "contest", &[model_id])
+        .await?
+        .remove(&model_id)
+        .unwrap_or_default();
     Ok(Json(model_to_contest_response(
         model,
         &match_status,
         recommended_hours,
         custom_values.get(&model_id).cloned().unwrap_or_default(),
+        student.as_ref(),
+        attachments,
     )))
 }
 
@@ -359,10 +408,17 @@ fn model_to_contest_response(
     match_status: &str,
     recommended_hours: i32,
     custom_fields: Vec<CustomFieldValueResponse>,
+    student: Option<&students::Model>,
+    attachments: Vec<AttachmentInfo>,
 ) -> ContestRecordResponse {
     ContestRecordResponse {
         id: model.id,
         student_id: model.student_id,
+        student_no: student.map(|item| item.student_no.clone()),
+        student_name: student.map(|item| item.name.clone()),
+        department: student.and_then(|item| item.department.clone()),
+        major: student.and_then(|item| item.major.clone()),
+        class_name: student.and_then(|item| item.class_name.clone()),
         contest_name: model.contest_name,
         contest_year: model.contest_year,
         contest_category: model.contest_category,
@@ -378,7 +434,57 @@ fn model_to_contest_response(
         match_status: match_status.to_string(),
         recommended_hours,
         custom_fields,
+        attachments,
     }
+}
+
+async fn load_students_map(
+    state: &AppState,
+    student_ids: &[Uuid],
+) -> Result<HashMap<Uuid, students::Model>, AppError> {
+    if student_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = Student::find()
+        .filter(students::Column::Id.is_in(student_ids.iter().cloned()))
+        .filter(students::Column::IsDeleted.eq(false))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    let mut map = HashMap::new();
+    for row in rows {
+        map.insert(row.id, row);
+    }
+    Ok(map)
+}
+
+async fn load_attachments_map(
+    state: &AppState,
+    record_type: &str,
+    record_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<AttachmentInfo>>, AppError> {
+    if record_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = Attachment::find()
+        .filter(attachments::Column::RecordType.eq(record_type))
+        .filter(attachments::Column::RecordId.is_in(record_ids.iter().cloned()))
+        .all(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?;
+    let mut grouped: HashMap<Uuid, Vec<AttachmentInfo>> = HashMap::new();
+    for row in rows {
+        grouped
+            .entry(row.record_id)
+            .or_default()
+            .push(AttachmentInfo {
+                id: row.id,
+                original_name: row.original_name,
+                mime_type: row.mime_type,
+                download_url: format!("/attachments/{}", row.id),
+            });
+    }
+    Ok(grouped)
 }
 
 async fn contest_match_status(state: &AppState, contest_name: &str) -> Result<String, AppError> {
@@ -442,7 +548,7 @@ fn parse_award_date(value: Option<&str>) -> Result<Option<chrono::DateTime<chron
     }
     if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
         let dt = date.and_hms_opt(0, 0, 0).ok_or_else(|| AppError::validation("invalid award date"))?;
-        return Ok(Some(chrono::DateTime::<Utc>::from_utc(dt, Utc)));
+        return Ok(Some(Utc.from_utc_datetime(&dt)));
     }
     Err(AppError::validation("invalid award date"))
 }
@@ -613,6 +719,7 @@ mod tests {
             password_hash: None,
             allow_password_login: false,
             password_updated_at: None,
+            must_change_password: false,
             is_active: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),

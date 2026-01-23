@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 
 use umya_spreadsheet::structs::drawing::spreadsheet::MarkerType;
-use umya_spreadsheet::structs::Image;
+use umya_spreadsheet::structs::{Image, OrientationValues};
 use umya_spreadsheet::Spreadsheet;
 
 use crate::error::AppError;
@@ -31,10 +31,12 @@ pub fn render_template_to_xlsx(
     output_path: &Path,
     single_values: &HashMap<String, String>,
     list_values: &[HashMap<String, String>],
+    orientation: OrientationValues,
 ) -> Result<(), AppError> {
     let mut workbook = umya_spreadsheet::reader::xlsx::read(template_path)
         .map_err(|_| AppError::bad_request("invalid export template"))?;
 
+    apply_page_setup(&mut workbook, orientation);
     apply_list_placeholders(&mut workbook, list_values)?;
     apply_single_placeholders(&mut workbook, single_values)?;
 
@@ -285,6 +287,7 @@ fn set_cell_value(sheet: &mut umya_spreadsheet::Worksheet, column: u32, row: u32
     let coord = format!("{}{}", column_label(column), row);
     let cell = sheet.get_cell_mut(coord.as_str());
     cell.set_value(value);
+    adjust_cell_size(sheet, column, row, value);
 }
 
 fn insert_signature_image(
@@ -305,8 +308,70 @@ fn insert_signature_image(
     marker.set_coordinate(coord.as_str());
     let mut image = Image::default();
     image.new_image(path, marker);
+    if let Some(anchor) = image.get_one_cell_anchor_mut() {
+        let (cx, cy) = cell_extent_emu(sheet, column, row);
+        if cx > 0 && cy > 0 {
+            anchor.get_extent_mut().set_cx(cx);
+            anchor.get_extent_mut().set_cy(cy);
+        }
+    }
     sheet.add_image(image);
     Ok(())
+}
+
+fn apply_page_setup(workbook: &mut Spreadsheet, orientation: OrientationValues) {
+    for sheet in workbook.get_sheet_collection_mut() {
+        let setup = sheet.get_page_setup_mut();
+        setup.set_paper_size(9);
+        setup.set_orientation(orientation.clone());
+    }
+}
+
+fn adjust_cell_size(
+    sheet: &mut umya_spreadsheet::Worksheet,
+    column: u32,
+    row: u32,
+    value: &str,
+) {
+    if value.trim().is_empty() {
+        return;
+    }
+    let text_len = value.chars().count().max(1);
+    let estimated_width = (text_len as f64) * 1.2;
+    let column_dimension = sheet.get_column_dimension_by_number_mut(&column);
+    let current_width = *column_dimension.get_width();
+    if estimated_width > current_width {
+        column_dimension.set_width(estimated_width);
+    }
+
+    let max_chars_per_line = ((current_width.max(8.38) * 1.1).floor() as usize).max(1);
+    let lines = (text_len + max_chars_per_line - 1) / max_chars_per_line;
+    let target_height = 15.0 * lines as f64;
+    let row_dimension = sheet.get_row_dimension_mut(&row);
+    let current_height = *row_dimension.get_height();
+    if target_height > current_height {
+        row_dimension.set_height(target_height);
+    }
+}
+
+fn cell_extent_emu(
+    sheet: &umya_spreadsheet::Worksheet,
+    column: u32,
+    row: u32,
+) -> (i64, i64) {
+    let col_width = sheet
+        .get_column_dimension_by_number(&column)
+        .map(|col| *col.get_width())
+        .unwrap_or(8.38);
+    let row_height = sheet
+        .get_row_dimension(&row)
+        .map(|row| *row.get_height())
+        .unwrap_or(15.0);
+    let px_width = (col_width * 7.0 + 5.0).max(1.0);
+    let px_height = (row_height * 96.0 / 72.0).max(1.0);
+    let cx = (px_width * 9525.0) as i64;
+    let cy = (px_height * 9525.0) as i64;
+    (cx, cy)
 }
 
 fn extract_placeholders(value: &str) -> Vec<String> {

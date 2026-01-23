@@ -40,6 +40,7 @@ const formFieldRules = {
 const exportTemplateFile = ref<File | null>(null)
 const exportTemplateName = ref('')
 const exportIssues = ref<string[]>([])
+const exportOrientation = ref<'portrait' | 'landscape'>('portrait')
 const exportRequest = useRequest()
 const exportUploadRequest = useRequest()
 
@@ -83,6 +84,7 @@ const loadExportTemplate = async () => {
     const data = await getExportTemplateFile('labor_hours')
     exportTemplateName.value = data.name || ''
     exportIssues.value = data.issues ?? []
+    exportOrientation.value = data.orientation ?? 'portrait'
   })
 }
 
@@ -97,9 +99,14 @@ const handleExportUpload = async () => {
   }
   await exportUploadRequest.run(
     async () => {
-      const data = await uploadExportTemplateFile('labor_hours', exportTemplateFile.value as File)
+      const data = await uploadExportTemplateFile(
+        'labor_hours',
+        exportTemplateFile.value as File,
+        exportOrientation.value,
+      )
       exportTemplateName.value = data.name || ''
       exportIssues.value = data.issues ?? []
+      exportOrientation.value = data.orientation ?? exportOrientation.value
     },
     { successMessage: '导出模板已更新' },
   )
@@ -198,6 +205,14 @@ onMounted(() => {
         >
           <el-button>选择 Excel 模板</el-button>
         </el-upload>
+        <el-form label-position="top" style="margin-top: 12px">
+          <el-form-item label="纸张方向（A4）">
+            <el-radio-group v-model="exportOrientation">
+              <el-radio label="portrait">纵向</el-radio>
+              <el-radio label="landscape">横向</el-radio>
+            </el-radio-group>
+          </el-form-item>
+        </el-form>
         <el-button
           type="primary"
           style="margin-top: 12px"

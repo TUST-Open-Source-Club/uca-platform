@@ -1,6 +1,12 @@
 //! 附件与签名上传接口。
 
-use axum::{extract::{Path, State, Multipart}, Json};
+use axum::{
+    body::Body,
+    extract::{Multipart, Path, State},
+    http::{header, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
 use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
@@ -11,9 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     access::require_session_user,
-    entities::{
-        attachments, review_signatures, students, ContestRecord, Student,
-    },
+    entities::{attachments, review_signatures, students, Attachment, ContestRecord, Student},
     error::AppError,
     state::AppState,
 };
@@ -115,6 +119,58 @@ pub async fn upload_review_signature(
     }))
 }
 
+/// 下载附件（审核人员/管理员/学生本人）。
+pub async fn download_attachment(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(attachment_id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    let attachment = Attachment::find_by_id(attachment_id)
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("attachment not found"))?;
+
+    if user.role == "student" {
+        let student = Student::find()
+            .filter(students::Column::StudentNo.eq(&user.username))
+            .filter(students::Column::IsDeleted.eq(false))
+            .one(&state.db)
+            .await
+            .map_err(|err| AppError::Database(err.to_string()))?
+            .ok_or_else(|| AppError::not_found("student not found"))?;
+        if attachment.student_id != student.id {
+            return Err(AppError::auth("forbidden"));
+        }
+    } else if user.role != "admin" && user.role != "reviewer" && user.role != "teacher" {
+        return Err(AppError::auth("forbidden"));
+    }
+
+    let bytes = fs::read(&attachment.stored_name)
+        .await
+        .map_err(|_| AppError::not_found("file not found"))?;
+
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&attachment.mime_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    let disposition = format!(
+        "inline; filename=\"{}\"",
+        attachment.original_name.replace('"', "_")
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&disposition)
+            .unwrap_or_else(|_| HeaderValue::from_static("inline")),
+    );
+    Ok(response)
+}
+
 async fn upload_record_attachment(
     state: &AppState,
     jar: &CookieJar,
@@ -138,6 +194,9 @@ async fn upload_record_attachment(
     ensure_record_ownership(state, record_type, record_id, student.id).await?;
 
     let (bytes, original_name, mime_type) = read_multipart_file(multipart).await?;
+    if !is_supported_attachment(&mime_type) {
+        return Err(AppError::bad_request("unsupported file type"));
+    }
     let stored_name = build_stored_name(
         &student.student_no,
         &student.name,
@@ -233,6 +292,11 @@ async fn read_multipart_file(mut multipart: Multipart) -> Result<(Vec<u8>, Strin
     let mime_type = mime_type.ok_or_else(|| AppError::bad_request("mime required"))?;
 
     Ok((bytes, filename, mime_type))
+}
+
+fn is_supported_attachment(mime_type: &str) -> bool {
+    let lower = mime_type.to_ascii_lowercase();
+    lower == "application/pdf" || lower.starts_with("image/")
 }
 
 fn build_stored_name(student_no: &str, name: &str, file_type: &str, original: &str) -> String {

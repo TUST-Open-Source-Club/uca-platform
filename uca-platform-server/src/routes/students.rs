@@ -2,7 +2,9 @@
 
 use axum::{extract::{State, Multipart, Path}, Json};
 use axum_extra::extract::cookie::CookieJar;
-use calamine::{Data, Reader};
+use calamine::Reader;
+#[cfg(test)]
+use calamine::Data;
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -411,7 +413,7 @@ pub async fn import_students(
             active.department = Set(department);
             active.major = Set(major);
             active.class_name = Set(class_name);
-            active.phone = Set(phone);
+            active.phone = Set(phone.clone());
             active.updated_at = Set(now);
             active.is_deleted = Set(false);
             active
@@ -437,7 +439,7 @@ pub async fn import_students(
                 department: Set(department),
                 major: Set(major),
                 class_name: Set(class_name),
-                phone: Set(phone),
+                phone: Set(phone.clone()),
                 is_deleted: Set(false),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -717,6 +719,7 @@ where
     Ok(record.map(|item| item.allow_password_login).unwrap_or(false))
 }
 
+#[cfg(test)]
 fn read_cell(index: &std::collections::HashMap<String, usize>, key: &str, row: &[Data]) -> String {
     let idx = match index.get(key) {
         Some(idx) => *idx,

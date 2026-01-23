@@ -44,7 +44,7 @@ const studentFieldMap = ref([
 const contestFieldMap = ref([
   { key: 'student_no', label: '学号', column: '' },
   { key: 'contest_name', label: '竞赛名称', column: '' },
-  { key: 'contest_level', label: '竞赛级别', column: '' },
+  { key: 'contest_level', label: '获奖级别', column: '' },
   { key: 'contest_role', label: '角色', column: '' },
   { key: 'award_level', label: '获奖等级', column: '' },
   { key: 'self_hours', label: '自评学时', column: '' },

@@ -58,6 +58,7 @@ pub fn router(state: AppState) -> Router {
         .route("/records/contest/query", post(records::list_contest_records))
         .route("/records/contest/:record_id/review", post(records::review_contest_record))
         .route("/attachments/contest/:record_id", post(attachments::upload_contest_attachment))
+        .route("/attachments/:attachment_id", get(attachments::download_attachment))
         .route("/signatures/:record_type/:record_id/:stage", post(attachments::upload_review_signature))
         .route("/export/summary/excel", post(exports::export_summary_excel))
         .route("/export/student/:student_no/excel", post(exports::export_student_excel))

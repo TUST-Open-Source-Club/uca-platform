@@ -163,7 +163,7 @@ const handleLogin = async () => {
           />
         </el-select>
         <div style="margin-top: 6px; color: var(--muted); font-size: 12px">
-          密码登录仅限学生使用，教职工请使用 Passkey 或 TOTP。
+          密码登录仅限普通学生使用，管理员、审核人员、教师请使用 Passkey 或 TOTP。
         </div>
       </el-form-item>
       <el-form-item v-if="form.method === 'totp'" label="验证码" prop="code">
@@ -171,9 +171,6 @@ const handleLogin = async () => {
       </el-form-item>
       <el-form-item v-if="form.method === 'password'" label="密码" prop="password">
         <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" />
-        <div style="margin-top: 6px; color: var(--muted); font-size: 12px">
-          学生默认密码为 st+学号，登录后可在个人中心修改。
-        </div>
       </el-form-item>
       <el-button type="primary" :loading="requestLoading" @click="handleLogin">进入认证</el-button>
     </el-form>

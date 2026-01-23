@@ -37,6 +37,7 @@ pub struct ExportTemplateConfig {
     pub template_key: String,
     pub name: String,
     pub issues: Vec<String>,
+    pub orientation: String,
 }
 
 /// 读取导入模板配置（不存在时返回默认模板）。
@@ -89,10 +90,12 @@ pub async fn load_export_template(
         .map_err(|err| AppError::Database(err.to_string()))?
     {
         let issues = parse_export_template_issues(&template.layout_json);
+        let orientation = parse_export_template_orientation(&template.layout_json);
         return Ok(ExportTemplateConfig {
             template_key: template.template_key,
             name: template.name,
             issues,
+            orientation,
         });
     }
 
@@ -105,11 +108,16 @@ pub async fn upsert_export_template_meta(
     template_key: &str,
     name: String,
     issues: Vec<String>,
+    orientation: String,
 ) -> Result<ExportTemplateConfig, AppError> {
     let now = chrono::Utc::now();
-    let layout_json = serde_json::to_string(&serde_json::json!({ "issues": issues }))
+    let layout_json = serde_json::to_string(&serde_json::json!({
+        "issues": issues,
+        "orientation": orientation
+    }))
         .map_err(|_| AppError::bad_request("invalid export template meta"))?;
     let parsed_issues = parse_export_template_issues(&layout_json);
+    let parsed_orientation = parse_export_template_orientation(&layout_json);
 
     if let Some(existing) = ExportTemplate::find()
         .filter(export_templates::Column::TemplateKey.eq(template_key))
@@ -144,6 +152,7 @@ pub async fn upsert_export_template_meta(
         template_key: template_key.to_string(),
         name,
         issues: parsed_issues,
+        orientation: parsed_orientation,
     })
 }
 
@@ -362,6 +371,7 @@ fn default_export_template(template_key: &str) -> ExportTemplateConfig {
         template_key: template_key.to_string(),
         name: String::new(),
         issues: Vec::new(),
+        orientation: "portrait".to_string(),
     }
 }
 
@@ -379,6 +389,18 @@ fn parse_export_template_issues(layout_json: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_export_template_orientation(layout_json: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(layout_json) else {
+        return "portrait".to_string();
+    };
+    value
+        .get("orientation")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .filter(|value| value == "portrait" || value == "landscape")
+        .unwrap_or_else(|| "portrait".to_string())
 }
 
 /// 导出模板文件路径。

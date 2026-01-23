@@ -3,7 +3,7 @@
 use axum::{extract::{State, Multipart, Path}, Json};
 use axum_extra::extract::cookie::CookieJar;
 use calamine::{Data, Reader};
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -139,6 +139,7 @@ pub struct ExportTemplateResponse {
     pub template_key: String,
     pub name: String,
     pub issues: Vec<String>,
+    pub orientation: String,
 }
 
 /// 重置认证方式请求。
@@ -1106,7 +1107,14 @@ pub async fn upload_export_template(
         return Err(AppError::bad_request("unknown template key"));
     }
 
-    let (file_bytes, file_name) = read_upload_file(&mut multipart).await?;
+    let (file_bytes, file_name, fields) = read_upload_file_with_fields(&mut multipart).await?;
+    let orientation = fields
+        .get("orientation")
+        .map(|value| value.as_str())
+        .unwrap_or("portrait");
+    if orientation != "portrait" && orientation != "landscape" {
+        return Err(AppError::bad_request("invalid orientation"));
+    }
     let issues = crate::export_template::validate_export_template_bytes(&file_bytes)?;
 
     let template_path = export_template_file_path(&state, &template_key);
@@ -1118,7 +1126,7 @@ pub async fn upload_export_template(
         .map_err(|err| AppError::internal(&format!("save template failed: {err}")))?;
 
     let updated =
-        upsert_export_template_meta(&state, &template_key, file_name, issues).await?;
+        upsert_export_template_meta(&state, &template_key, file_name, issues, orientation.to_string()).await?;
     Ok(Json(export_template_to_response(updated)))
 }
 
@@ -1863,44 +1871,6 @@ pub async fn import_contest_records(
     Ok(Json(serde_json::json!({ "inserted": inserted, "skipped": skipped })))
 }
 
-async fn read_upload_bytes(multipart: &mut Multipart) -> Result<Vec<u8>, AppError> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| AppError::bad_request("invalid multipart"))?
-    {
-        if field.name() == Some("file") {
-            let bytes = field
-                .bytes()
-                .await
-                .map_err(|_| AppError::bad_request("failed to read file"))?;
-            return Ok(bytes.to_vec());
-        }
-    }
-    Err(AppError::bad_request("file field required"))
-}
-
-async fn read_upload_file(multipart: &mut Multipart) -> Result<(Vec<u8>, String), AppError> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| AppError::bad_request("invalid multipart"))?
-    {
-        if field.name() == Some("file") {
-            let name = field
-                .file_name()
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "template.xlsx".to_string());
-            let bytes = field
-                .bytes()
-                .await
-                .map_err(|_| AppError::bad_request("failed to read file"))?;
-            return Ok((bytes.to_vec(), name));
-        }
-    }
-    Err(AppError::bad_request("file field required"))
-}
-
 async fn read_upload_payload(
     multipart: &mut Multipart,
 ) -> Result<(Vec<u8>, HashMap<String, String>), AppError> {
@@ -1954,6 +1924,7 @@ fn find_header_index(
     candidates.iter().find_map(|key| header_index.get(*key).cloned())
 }
 
+#[cfg(test)]
 fn map_base_indices(
     header_index: &HashMap<String, usize>,
     candidates: &[(&str, &[&str])],
@@ -2074,9 +2045,51 @@ fn export_template_to_response(template: ExportTemplateConfig) -> ExportTemplate
         template_key: template.template_key,
         name: template.name,
         issues: template.issues,
+        orientation: template.orientation,
     }
 }
 
+async fn read_upload_file_with_fields(
+    multipart: &mut Multipart,
+) -> Result<(Vec<u8>, String, HashMap<String, String>), AppError> {
+    let mut file_bytes = None;
+    let mut file_name = None;
+    let mut fields = HashMap::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::bad_request("invalid multipart"))?
+    {
+        let name = field.name().map(|value| value.to_string());
+        match name.as_deref() {
+            Some("file") => {
+                let name = field
+                    .file_name()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "template.xlsx".to_string());
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read file"))?;
+                file_bytes = Some(bytes.to_vec());
+                file_name = Some(name);
+            }
+            Some(key) => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::bad_request("failed to read field"))?;
+                fields.insert(key.to_string(), value);
+            }
+            None => {}
+        }
+    }
+    let bytes = file_bytes.ok_or_else(|| AppError::bad_request("file field required"))?;
+    let name = file_name.unwrap_or_else(|| "template.xlsx".to_string());
+    Ok((bytes, name, fields))
+}
+
+#[cfg(test)]
 fn ensure_required_headers(
     base_index: &HashMap<String, usize>,
     required: &[&str],
@@ -2115,7 +2128,7 @@ fn parse_award_date_cell(value: &str) -> Result<Option<chrono::DateTime<Utc>>, A
         let dt = date
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| AppError::validation("invalid award date"))?;
-        return Ok(Some(chrono::DateTime::<Utc>::from_utc(dt, Utc)));
+        return Ok(Some(Utc.from_utc_datetime(&dt)));
     }
     Err(AppError::validation("invalid award date"))
 }
@@ -2158,6 +2171,7 @@ async fn load_form_field_map(
     Ok(map)
 }
 
+#[cfg(test)]
 fn collect_reserved_headers(
     header_index: &HashMap<String, usize>,
     base_headers: &[(&str, &[&str])],

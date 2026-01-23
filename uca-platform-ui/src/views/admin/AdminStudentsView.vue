@@ -170,6 +170,38 @@ const handleAllowLoginChange = async (row: StudentItem, value: boolean) => {
   }, { successMessage: value ? '已允许学生登录' : '已禁止学生登录' })
 }
 
+const handleBulkDisableLogin = async () => {
+  if (!selection.value.length) return
+  const confirmed = await ElMessageBox.confirm(
+    `确认禁止已选中的 ${selection.value.length} 名学生登录？`,
+    '批量禁止登录',
+    { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+  await loginRequest.run(async () => {
+    for (const item of selection.value) {
+      await updateStudentLogin(item.student_no, false)
+      item.allow_password_login = false
+    }
+  }, { successMessage: '已批量禁止登录' })
+}
+
+const handleDisableAllLogins = async () => {
+  if (!students.value.length) return
+  const confirmed = await ElMessageBox.confirm(
+    `确认禁止当前列表中的 ${students.value.length} 名学生登录？`,
+    '一键禁止全部',
+    { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+  ).then(() => true).catch(() => false)
+  if (!confirmed) return
+  await loginRequest.run(async () => {
+    for (const item of students.value) {
+      await updateStudentLogin(item.student_no, false)
+      item.allow_password_login = false
+    }
+  }, { successMessage: '已禁止所有学生登录' })
+}
+
 const handleCreateUsers = async (targets: StudentItem[]) => {
   if (!targets.length) return
   const prefix = passwordRule.prefix?.trim() ?? ''
@@ -279,6 +311,12 @@ onMounted(() => {
     <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end">
       <el-button :loading="listRequest.loading" @click="loadStudents">刷新列表</el-button>
       <el-button @click="handleToggleAll">全选</el-button>
+      <el-button type="danger" :disabled="!selection.length" :loading="loginRequest.loading" @click="handleBulkDisableLogin">
+        批量禁止登录
+      </el-button>
+      <el-button type="danger" :loading="loginRequest.loading" @click="handleDisableAllLogins">
+        一键禁止所有学生
+      </el-button>
       <el-button type="primary" :disabled="!selection.length" :loading="createUserRequest.loading" @click="handleBulkCreateUsers">
         批量创建用户
       </el-button>

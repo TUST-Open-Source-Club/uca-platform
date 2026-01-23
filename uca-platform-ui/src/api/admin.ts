@@ -223,6 +223,7 @@ export type ExportTemplateFile = {
   template_key: string
   name: string
   issues: string[]
+  orientation: 'portrait' | 'landscape'
 }
 
 export async function getExportTemplateFile(templateKey: string): Promise<ExportTemplateFile> {
@@ -232,9 +233,11 @@ export async function getExportTemplateFile(templateKey: string): Promise<Export
 export async function uploadExportTemplateFile(
   templateKey: string,
   file: File,
+  orientation: 'portrait' | 'landscape',
 ): Promise<ExportTemplateFile> {
   const form = new FormData()
   form.append('file', file)
+  form.append('orientation', orientation)
   return requestMultipart(`/admin/export-templates/${encodeURIComponent(templateKey)}/upload`, form)
 }
 

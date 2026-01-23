@@ -73,3 +73,7 @@ export async function downloadFile(path: string, body?: unknown): Promise<void> 
   link.remove()
   URL.revokeObjectURL(url)
 }
+
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`
+}

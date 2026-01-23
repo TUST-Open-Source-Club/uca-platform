@@ -25,7 +25,7 @@ use crate::{
     export_template::render_template_to_xlsx,
     labor_hours::{compute_recommended_hours, load_labor_hour_rules},
     state::AppState,
-    templates::export_template_file_path,
+    templates::{export_template_file_path, load_export_template},
 };
 
 /// 汇总导出筛选条件。
@@ -483,6 +483,7 @@ pub async fn export_labor_hours_pdf(
     let rule_config = load_labor_hour_rules(&state).await?;
     let signature_bundle = load_reviewer_signatures(&state, &records).await?;
 
+    let template_meta = load_export_template(&state, "labor_hours").await?;
     let template_path = export_template_file_path(&state, "labor_hours");
     if !template_path.exists() {
         return Err(AppError::bad_request("export template not configured"));
@@ -500,7 +501,18 @@ pub async fn export_labor_hours_pdf(
     let temp_dir = tempfile::tempdir()
         .map_err(|_| AppError::internal("create temp dir failed"))?;
     let output_xlsx = temp_dir.path().join("labor_hours.xlsx");
-    render_template_to_xlsx(&template_path, &output_xlsx, &single_values, &list_values)?;
+    let orientation = if template_meta.orientation == "landscape" {
+        umya_spreadsheet::structs::OrientationValues::Landscape
+    } else {
+        umya_spreadsheet::structs::OrientationValues::Portrait
+    };
+    render_template_to_xlsx(
+        &template_path,
+        &output_xlsx,
+        &single_values,
+        &list_values,
+        orientation,
+    )?;
     let buffer = convert_xlsx_to_pdf(&state.config.libreoffice_path, &output_xlsx, temp_dir.path())?;
 
     Ok(file_response(

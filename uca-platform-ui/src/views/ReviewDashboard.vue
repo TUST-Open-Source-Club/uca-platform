@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { UploadFile } from 'element-plus'
 import { ElMessageBox } from 'element-plus'
+import { apiUrl } from '../api/client'
 import { reviewContest, queryContest, type ContestRecord } from '../api/records'
 import { uploadSignature } from '../api/attachments'
 import { useRequest } from '../composables/useRequest'
@@ -248,6 +249,8 @@ const handleToggleAll = () => {
   tableRef.value?.toggleAllSelection?.()
 }
 
+const resolveAttachmentUrl = (path: string) => apiUrl(path)
+
 onMounted(async () => {
   await authStore.ensureSession()
   await loadRecords()
@@ -274,7 +277,7 @@ onMounted(async () => {
           <el-option label="B 类" value="B" />
         </el-select>
       </el-form-item>
-      <el-form-item label="竞赛级别">
+      <el-form-item label="获奖级别">
         <el-input v-model="filterForm.contest_level" placeholder="国家级" />
       </el-form-item>
       <el-form-item label="竞赛角色">
@@ -314,6 +317,11 @@ onMounted(async () => {
       @row-dblclick="openReview"
     >
       <el-table-column type="selection" width="48" />
+      <el-table-column prop="student_no" label="学号" min-width="140" />
+      <el-table-column prop="student_name" label="姓名" width="120" />
+      <el-table-column prop="department" label="学院" min-width="140" />
+      <el-table-column prop="major" label="专业" min-width="140" />
+      <el-table-column prop="class_name" label="班级" min-width="140" />
       <el-table-column prop="contest_name" label="竞赛名称" min-width="200" />
       <el-table-column prop="contest_year" label="年份" width="120" />
       <el-table-column prop="contest_category" label="类型" width="100" />
@@ -325,6 +333,12 @@ onMounted(async () => {
       <el-table-column prop="status" label="审核状态" width="140" />
       <el-table-column prop="match_status" label="匹配状态" width="120" />
       <el-table-column prop="rejection_reason" label="不通过原因" min-width="160" />
+      <el-table-column label="附件" min-width="140">
+        <template #default="{ row }">
+          <span v-if="row.attachments?.length">{{ row.attachments.length }} 个</span>
+          <span v-else>无</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="120">
         <template #default="{ row }">
           <el-button size="small" @click="openReview(row)">审核</el-button>
@@ -349,14 +363,44 @@ onMounted(async () => {
   <el-drawer v-model="reviewDrawerVisible" size="520px" title="审核记录">
     <div v-if="currentRecord">
       <el-descriptions :column="1" border>
+        <el-descriptions-item label="学号">{{ currentRecord.student_no ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="姓名">{{ currentRecord.student_name ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="学院">{{ currentRecord.department ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="专业">{{ currentRecord.major ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="班级">{{ currentRecord.class_name ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="竞赛名称">{{ currentRecord.contest_name }}</el-descriptions-item>
         <el-descriptions-item label="竞赛年份">{{ currentRecord.contest_year ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="竞赛类型">{{ currentRecord.contest_category ?? '-' }}</el-descriptions-item>
-        <el-descriptions-item label="竞赛级别">{{ currentRecord.contest_level ?? '-' }}</el-descriptions-item>
+        <el-descriptions-item label="获奖级别">{{ currentRecord.contest_level ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="竞赛角色">{{ currentRecord.contest_role ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="获奖等级">{{ currentRecord.award_level }}</el-descriptions-item>
         <el-descriptions-item label="推荐学时">{{ currentRecord.recommended_hours }}</el-descriptions-item>
       </el-descriptions>
+
+      <el-divider />
+      <h4>附件</h4>
+      <div v-if="currentRecord.attachments?.length" style="display: grid; gap: 12px">
+        <div
+          v-for="attachment in currentRecord.attachments"
+          :key="attachment.id"
+          style="display: flex; flex-direction: column; gap: 6px"
+        >
+          <strong>{{ attachment.original_name }}</strong>
+          <div v-if="attachment.mime_type.startsWith('image/')">
+            <el-image
+              :src="resolveAttachmentUrl(attachment.download_url)"
+              style="width: 240px; max-height: 180px"
+              fit="contain"
+            />
+          </div>
+          <div v-else>
+            <el-link :href="resolveAttachmentUrl(attachment.download_url)" target="_blank">
+              下载/查看
+            </el-link>
+          </div>
+        </div>
+      </div>
+      <el-empty v-else description="暂无附件" />
 
       <el-form ref="reviewFormRef" :model="reviewForm" :rules="rules" label-position="top" style="margin-top: 16px">
         <el-form-item label="审核阶段">

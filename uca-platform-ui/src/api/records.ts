@@ -26,6 +26,11 @@ export type CustomFieldValue = {
 export type ContestRecord = {
   id: string
   student_id: string
+  student_no?: string | null
+  student_name?: string | null
+  department?: string | null
+  major?: string | null
+  class_name?: string | null
   contest_name: string
   contest_year?: number | null
   contest_category?: string | null
@@ -41,6 +46,12 @@ export type ContestRecord = {
   match_status: string
   recommended_hours: number
   custom_fields: CustomFieldValue[]
+  attachments?: {
+    id: string
+    original_name: string
+    mime_type: string
+    download_url: string
+  }[]
 }
 
 export async function queryContest(status?: string): Promise<ContestRecord[]> {

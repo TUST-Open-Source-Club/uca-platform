@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import type { UploadFile } from 'element-plus'
 import { listCompetitionsPublic, type CompetitionItem } from '../api/catalog'
+import { uploadContestAttachment } from '../api/attachments'
 import { createContest } from '../api/records'
 import { bindEmail, changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
@@ -27,6 +29,8 @@ const contestForm = reactive<Record<string, string | number>>({
   award_date: '',
   self_hours: 0,
 })
+const attachmentFile = ref<File | null>(null)
+const attachmentError = ref('')
 
 const accountFormRef = ref()
 const accountForm = reactive({
@@ -36,10 +40,19 @@ const accountForm = reactive({
 })
 
 const accountRules = {
-  email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
+  email: [{ required: () => authStore.resetDelivery === 'email', message: '请输入邮箱', trigger: 'blur' }],
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
   new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }],
 }
+
+const mustChangeDialog = ref(false)
+watch(
+  () => authStore.mustChangePassword,
+  (value) => {
+    mustChangeDialog.value = value
+  },
+  { immediate: true },
+)
 
 const passwordPolicy = ref<PasswordPolicy | null>(null)
 const passwordHint = computed(() => {
@@ -62,7 +75,7 @@ const validateHours = (_: unknown, value: number, callback: (error?: Error) => v
 
 const contestRules = reactive<Record<string, unknown>>({
   contest_name: [{ required: true, message: '请输入竞赛名称', trigger: 'blur' }],
-  contest_level: [{ required: true, message: '请选择竞赛级别', trigger: 'change' }],
+  contest_level: [{ required: true, message: '请选择获奖级别', trigger: 'change' }],
   contest_role: [{ required: true, message: '请选择角色', trigger: 'change' }],
   award_level: [{ required: true, message: '请输入获奖等级', trigger: 'blur' }],
   self_hours: [
@@ -143,6 +156,10 @@ const handleContestSubmit = async () => {
   if (!contestFormRef.value) return
   await contestFormRef.value.validate(async (valid: boolean) => {
     if (!valid) return
+    if (!attachmentFile.value) {
+      attachmentError.value = '请上传获奖证明附件（PDF 或图片）'
+      return
+    }
     result.value = ''
     await contestRequest.run(
       async () => {
@@ -159,6 +176,13 @@ const handleContestSubmit = async () => {
           self_hours: Number(contestForm.self_hours),
           custom_fields: extractCustomFields(contestFields.value, contestForm),
         })
+        const recordId = (data as { id?: string }).id
+        if (!recordId) {
+          throw new Error('记录创建失败，未返回记录 ID')
+        }
+        await uploadContestAttachment(recordId, attachmentFile.value as File)
+        attachmentFile.value = null
+        attachmentError.value = ''
         result.value = JSON.stringify(data, null, 2)
       },
       { successMessage: '已提交竞赛获奖' },
@@ -166,10 +190,19 @@ const handleContestSubmit = async () => {
   })
 }
 
+const handleAttachmentChange = (file: UploadFile) => {
+  attachmentFile.value = file.raw ?? null
+  attachmentError.value = ''
+}
+
 const handleBindEmail = async () => {
   if (!accountFormRef.value) return
   await accountFormRef.value.validateField('email', async (valid: boolean) => {
     if (!valid) return
+    if (!accountForm.email.trim()) {
+      accountRequest.error = '请输入邮箱'
+      return
+    }
     await accountRequest.run(async () => {
       await bindEmail(accountForm.email)
     }, { successMessage: '邮箱已绑定' })
@@ -186,6 +219,7 @@ const handleChangePassword = async () => {
       new_password: accountForm.new_password,
     })
     await authStore.refreshSession()
+    mustChangeDialog.value = false
   }, { successMessage: '密码已更新' })
   })
 }
@@ -197,16 +231,35 @@ const handleChangePassword = async () => {
     <p>提交竞赛获奖与劳动教育学时认定申请。</p>
   </section>
 
-  <el-alert
-    v-if="authStore.mustChangePassword"
-    class="card"
-    type="warning"
-    show-icon
-    title="首次登录或重置后必须修改密码，请先在下方完成密码修改。"
-    :closable="false"
-  />
+  <el-dialog
+    v-model="mustChangeDialog"
+    title="首次登录请修改密码"
+    width="520px"
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+    :show-close="false"
+  >
+    <el-form ref="accountFormRef" :model="accountForm" :rules="accountRules" label-position="top">
+      <el-form-item label="当前密码" prop="current_password">
+        <el-input v-model="accountForm.current_password" type="password" show-password />
+      </el-form-item>
+      <el-form-item label="新密码" prop="new_password">
+        <el-input v-model="accountForm.new_password" type="password" show-password />
+      </el-form-item>
+      <el-alert
+        type="info"
+        show-icon
+        :title="passwordHint"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
+      <el-button type="primary" :loading="accountRequest.loading" @click="handleChangePassword">
+        修改密码并进入系统
+      </el-button>
+    </el-form>
+  </el-dialog>
 
-  <div class="card-grid">
+  <div v-if="!authStore.mustChangePassword" class="card-grid">
     <el-card class="card">
       <h3>竞赛获奖填报</h3>
       <el-form ref="contestFormRef" :model="contestForm" :rules="contestRules" label-position="top">
@@ -224,7 +277,7 @@ const handleChangePassword = async () => {
             <el-option label="B 类" value="B" />
           </el-select>
         </el-form-item>
-        <el-form-item label="竞赛级别" prop="contest_level">
+        <el-form-item label="获奖级别" prop="contest_level">
           <el-select v-model="contestForm.contest_level" placeholder="选择级别">
             <el-option label="国家级" value="国家级" />
             <el-option label="省级" value="省级" />
@@ -247,6 +300,23 @@ const handleChangePassword = async () => {
             value-format="YYYY-MM-DD"
             placeholder="选择日期"
           />
+        </el-form-item>
+        <el-form-item label="获奖证明附件">
+          <el-upload
+            :auto-upload="false"
+            :limit="1"
+            accept="application/pdf,image/*"
+            :show-file-list="true"
+            :on-change="handleAttachmentChange"
+          >
+            <el-button>选择附件</el-button>
+          </el-upload>
+          <div v-if="attachmentError" style="margin-top: 6px; color: var(--el-color-danger)">
+            {{ attachmentError }}
+          </div>
+          <div style="margin-top: 6px; color: var(--muted); font-size: 12px">
+            必须上传 PDF 或图片格式的获奖证明。
+          </div>
         </el-form-item>
         <el-form-item label="自评学时" prop="self_hours">
           <el-input-number v-model="contestForm.self_hours" :min="0" />
@@ -280,6 +350,9 @@ const handleChangePassword = async () => {
         <el-form-item label="绑定邮箱" prop="email">
           <el-input v-model="accountForm.email" placeholder="用于重置密码" />
         </el-form-item>
+        <div style="margin-bottom: 8px; color: var(--muted); font-size: 12px">
+          纯内网部署可不绑定邮箱，外网部署建议绑定以便自助找回密码。
+        </div>
         <el-button :loading="accountRequest.loading" @click="handleBindEmail">绑定邮箱</el-button>
 
         <el-divider style="margin: 16px 0" />

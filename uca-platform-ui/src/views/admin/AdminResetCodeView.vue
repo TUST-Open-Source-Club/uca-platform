@@ -8,7 +8,7 @@ const resetCodeForm = reactive({
   purpose: 'password',
 })
 
-const result = ref('')
+const result = ref<{ key: string; value: string }[] | null>(null)
 const resetCodeRequest = useRequest()
 
 const handleResetCode = async () => {
@@ -17,7 +17,10 @@ const handleResetCode = async () => {
       username: resetCodeForm.username,
       purpose: resetCodeForm.purpose as 'password' | 'totp' | 'passkey',
     })
-    result.value = JSON.stringify(data, null, 2)
+    result.value = [
+      { key: 'code', value: data.code ?? '-' },
+      { key: 'expires_in_minutes', value: String(data.expires_in_minutes ?? '-') },
+    ]
   }, { successMessage: '重置码已生成' })
 }
 </script>
@@ -59,6 +62,9 @@ const handleResetCode = async () => {
     :closable="false"
   />
   <el-card v-if="result" class="card" style="margin-top: 24px">
-    <pre>{{ result }}</pre>
+    <el-table :data="result" border>
+      <el-table-column prop="key" label="字段" width="200" />
+      <el-table-column prop="value" label="结果" />
+    </el-table>
   </el-card>
 </template>

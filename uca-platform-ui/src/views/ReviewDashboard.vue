@@ -7,6 +7,7 @@ import { reviewContest, queryContest, type ContestRecord } from '../api/records'
 import { uploadSignature } from '../api/attachments'
 import { useRequest } from '../composables/useRequest'
 import { useAuthStore } from '../stores/auth'
+import { formatMatchStatus, formatStatus } from '../utils/status'
 
 const authStore = useAuthStore()
 
@@ -23,7 +24,7 @@ const filterForm = reactive({
   award_level: '',
   status: '',
   match_status: '',
-  student_id: '',
+  student_no: '',
 })
 const emptyFilterForm = {
   contest_name: '',
@@ -34,7 +35,7 @@ const emptyFilterForm = {
   award_level: '',
   status: '',
   match_status: '',
-  student_id: '',
+  student_no: '',
 }
 
 const pagination = reactive({
@@ -82,18 +83,25 @@ const matchOptions = [
   { label: '未匹配', value: 'unmatched' },
 ]
 
+const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+const matchesPrefix = (value: unknown, pattern: string) => {
+  const needle = pattern.trim().toLowerCase()
+  if (!needle) return true
+  return normalizeValue(value).startsWith(needle)
+}
+
 const filteredRecords = computed(() => {
   const filters = { ...filterForm }
   return records.value.filter((record) => {
-    if (filters.contest_name && !record.contest_name.includes(filters.contest_name)) return false
-    if (filters.contest_year && String(record.contest_year ?? '') !== filters.contest_year) return false
-    if (filters.contest_category && (record.contest_category ?? '') !== filters.contest_category) return false
-    if (filters.contest_level && (record.contest_level ?? '') !== filters.contest_level) return false
-    if (filters.contest_role && (record.contest_role ?? '') !== filters.contest_role) return false
-    if (filters.award_level && !record.award_level.includes(filters.award_level)) return false
-    if (filters.status && record.status !== filters.status) return false
-    if (filters.match_status && record.match_status !== filters.match_status) return false
-    if (filters.student_id && record.student_id !== filters.student_id) return false
+    if (!matchesPrefix(record.contest_name, filters.contest_name)) return false
+    if (!matchesPrefix(record.contest_year, filters.contest_year)) return false
+    if (!matchesPrefix(record.contest_category, filters.contest_category)) return false
+    if (!matchesPrefix(record.contest_level, filters.contest_level)) return false
+    if (!matchesPrefix(record.contest_role, filters.contest_role)) return false
+    if (!matchesPrefix(record.award_level, filters.award_level)) return false
+    if (!matchesPrefix(record.status, filters.status)) return false
+    if (!matchesPrefix(record.match_status, filters.match_status)) return false
+    if (!matchesPrefix(record.student_no, filters.student_no)) return false
     return true
   })
 })
@@ -113,7 +121,7 @@ watch(
     filterForm.award_level,
     filterForm.status,
     filterForm.match_status,
-    filterForm.student_id,
+    filterForm.student_no,
   ],
   () => {
     pagination.page = 1
@@ -237,25 +245,6 @@ const handleBulkReview = async () => {
   })
 }
 
-const handleSignatureUpload = async () => {
-  if (!currentRecord.value) return
-  if (!signatureFile.value) {
-    signatureRequest.error = '请选择签名文件'
-    return
-  }
-  await signatureRequest.run(async () => {
-    await uploadSignature(
-      'contest',
-      currentRecord.value!.id,
-      reviewForm.stage,
-      signatureFile.value as File,
-    )
-  }, { successMessage: '签名已上传' })
-}
-
-const handleFileChange = (file: UploadFile) => {
-  signatureFile.value = file.raw ?? null
-}
 
 const handleSelectionChange = (rows: ContestRecord[]) => {
   selection.value = rows
@@ -312,8 +301,8 @@ onMounted(async () => {
           <el-option v-for="item in matchOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="学生 ID">
-        <el-input v-model="filterForm.student_id" placeholder="UUID" />
+      <el-form-item label="学号">
+        <el-input v-model="filterForm.student_no" placeholder="22201400" />
       </el-form-item>
     </el-form>
 
@@ -347,8 +336,16 @@ onMounted(async () => {
       <el-table-column prop="award_level" label="获奖等级" width="120" />
       <el-table-column prop="self_hours" label="自评学时" width="120" />
       <el-table-column prop="recommended_hours" label="推荐学时" width="120" />
-      <el-table-column prop="status" label="审核状态" width="140" />
-      <el-table-column prop="match_status" label="匹配状态" width="120" />
+      <el-table-column label="审核状态" width="140">
+        <template #default="{ row }">
+          {{ formatStatus(row.status) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="匹配状态" width="120">
+        <template #default="{ row }">
+          {{ formatMatchStatus(row.match_status) }}
+        </template>
+      </el-table-column>
       <el-table-column prop="rejection_reason" label="不通过原因" min-width="160" />
       <el-table-column label="附件" min-width="140">
         <template #default="{ row }">
@@ -440,27 +437,6 @@ onMounted(async () => {
         </el-form-item>
         <el-button type="primary" :loading="reviewRequest.loading" @click="handleReview">提交审核</el-button>
       </el-form>
-
-      <el-divider />
-
-      <h4>上传审核签名</h4>
-      <el-upload
-        :auto-upload="false"
-        :limit="1"
-        :show-file-list="true"
-        :on-change="handleFileChange"
-      >
-        <el-button>选择文件</el-button>
-      </el-upload>
-      <el-button
-        type="primary"
-        style="margin-top: 12px"
-        :loading="signatureRequest.loading"
-        @click="handleSignatureUpload"
-      >
-        上传签名
-      </el-button>
-
       <div style="margin-top: 16px; display: flex; gap: 8px">
         <el-button :disabled="currentIndex <= 0" @click="handlePrevNext('prev')">上一条</el-button>
         <el-button

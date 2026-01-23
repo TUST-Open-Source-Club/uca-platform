@@ -5,7 +5,7 @@ import { useRequest } from '../../composables/useRequest'
 import { useAuthStore } from '../../stores/auth'
 
 const userFormRef = ref()
-const result = ref('')
+const result = ref<{ key: string; value: string }[] | null>(null)
 const userRequest = useRequest()
 const auth = useAuthStore()
 
@@ -54,7 +54,12 @@ const handleCreateUser = async () => {
         reset_purpose: auth.resetDelivery === 'code' ? (userForm.reset_purpose as 'totp' | 'passkey') : undefined,
       }
       const data = await createUser(payload)
-      result.value = JSON.stringify(data, null, 2)
+      result.value = [
+        { key: 'invite_sent', value: data.invite_sent ? '是' : '否' },
+        { key: 'user_id', value: data.user_id ?? '-' },
+        { key: 'reset_code', value: data.reset_code ?? '-' },
+        { key: 'reset_purpose', value: data.reset_purpose ?? '-' },
+      ]
     }, { successMessage: '已提交用户创建' })
   })
 }
@@ -110,6 +115,9 @@ const handleCreateUser = async () => {
     :closable="false"
   />
   <el-card v-if="result" class="card" style="margin-top: 24px">
-    <pre>{{ result }}</pre>
+    <el-table :data="result" border>
+      <el-table-column prop="key" label="字段" width="160" />
+      <el-table-column prop="value" label="结果" />
+    </el-table>
   </el-card>
 </template>

@@ -52,14 +52,18 @@ const rules = {
   name: [{ required: true, message: '请输入竞赛名称', trigger: 'blur' }],
 }
 
+const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+const matchesPrefix = (value: unknown, pattern: string) => {
+  const needle = pattern.trim().toLowerCase()
+  if (!needle) return true
+  return normalizeValue(value).startsWith(needle)
+}
+
 const filteredCompetitions = computed(() => {
-  const name = filterForm.name.trim()
-  const category = filterForm.category.trim().toLowerCase()
-  const year = filterForm.year.trim()
   return competitions.value.filter((item) => {
-    if (name && !item.name.includes(name)) return false
-    if (category && (item.category ?? '').toLowerCase() !== category) return false
-    if (year && String(item.year ?? '') !== year) return false
+    if (!matchesPrefix(item.name, filterForm.name)) return false
+    if (!matchesPrefix(item.category, filterForm.category)) return false
+    if (!matchesPrefix(item.year, filterForm.year)) return false
     return true
   })
 })

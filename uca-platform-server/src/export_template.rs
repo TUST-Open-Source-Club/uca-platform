@@ -303,6 +303,15 @@ fn insert_signature_image(
     if !path_obj.exists() {
         return Ok(());
     }
+    let ext = path_obj
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let supported = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "bmp" | "gif");
+    if !supported {
+        return Ok(());
+    }
     let coord = format!("{}{}", column_label(column), row);
     let mut marker = MarkerType::default();
     marker.set_coordinate(coord.as_str());

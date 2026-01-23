@@ -57,7 +57,10 @@ const deleteRequest = useRequest()
 const loginRequest = useRequest()
 const resetRequest = useRequest()
 const createUserRequest = useRequest()
-const createUserResult = ref('')
+const createUserResult = ref<{
+  summary: { key: string; value: string }[]
+  passwords: { student_no: string; password: string }[]
+} | null>(null)
 
 const rules = {
   name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
@@ -75,14 +78,21 @@ const passwordRule = reactive({
   include_phone: false,
 })
 
+const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+const matchesPrefix = (value: unknown, pattern: string) => {
+  const needle = pattern.trim().toLowerCase()
+  if (!needle) return true
+  return normalizeValue(value).startsWith(needle)
+}
+
 const filteredStudents = computed(() => {
   return students.value.filter((item) => {
-    if (filterForm.department && item.department !== filterForm.department) return false
-    if (filterForm.major && item.major !== filterForm.major) return false
-    if (filterForm.class_name && item.class_name !== filterForm.class_name) return false
+    if (!matchesPrefix(item.department, filterForm.department)) return false
+    if (!matchesPrefix(item.major, filterForm.major)) return false
+    if (!matchesPrefix(item.class_name, filterForm.class_name)) return false
     if (filterForm.keyword) {
-      const keyword = filterForm.keyword.trim()
-      if (keyword && !item.student_no.includes(keyword) && !item.name.includes(keyword)) {
+      const keyword = filterForm.keyword.trim().toLowerCase()
+      if (keyword && !item.student_no.toLowerCase().startsWith(keyword) && !item.name.toLowerCase().startsWith(keyword)) {
         return false
       }
     }
@@ -226,7 +236,13 @@ const handleCreateUsers = async (targets: StudentItem[]) => {
       student_nos: targets.map((item) => item.student_no),
       password_rule: { ...passwordRule },
     })
-    createUserResult.value = JSON.stringify(data, null, 2)
+    createUserResult.value = {
+      summary: [
+        { key: 'created', value: String(data.created) },
+        { key: 'skipped', value: String(data.skipped) },
+      ],
+      passwords: data.passwords ?? [],
+    }
     await loadStudents()
   }, { successMessage: '学生用户已创建' })
 }
@@ -398,7 +414,19 @@ onMounted(() => {
 
   <el-card v-if="createUserResult" class="card" style="margin-top: 16px">
     <h3>创建用户结果</h3>
-    <pre>{{ createUserResult }}</pre>
+    <el-table :data="createUserResult.summary" border>
+      <el-table-column prop="key" label="字段" width="160" />
+      <el-table-column prop="value" label="结果" />
+    </el-table>
+    <el-table
+      v-if="createUserResult.passwords.length"
+      :data="createUserResult.passwords"
+      border
+      style="margin-top: 12px"
+    >
+      <el-table-column prop="student_no" label="学号" width="160" />
+      <el-table-column prop="password" label="密码" />
+    </el-table>
   </el-card>
 
   <el-dialog v-model="editDialogVisible" title="编辑学生" width="520px">

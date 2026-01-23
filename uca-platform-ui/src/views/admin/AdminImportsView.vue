@@ -11,7 +11,7 @@ const contestImportRef = ref()
 const importFile = ref<File | null>(null)
 const competitionImportFile = ref<File | null>(null)
 const contestImportFile = ref<File | null>(null)
-const result = ref('')
+const result = ref<{ key: string; value: string }[] | null>(null)
 const createStudentUsers = ref(false)
 const studentPasswordRule = reactive({
   prefix: 'st',
@@ -111,7 +111,10 @@ const handleImport = async () => {
           createStudentUsers.value,
           createStudentUsers.value ? { ...studentPasswordRule } : undefined,
         )
-        result.value = JSON.stringify(data, null, 2)
+        result.value = Object.entries(data as Record<string, unknown>).map(([key, value]) => ({
+          key,
+          value: value === null || value === undefined ? '-' : String(value),
+        }))
       },
       { successMessage: '已上传学生名单' },
     )
@@ -136,7 +139,10 @@ const handleCompetitionImport = async () => {
           undefined,
           payload.length ? payload : undefined,
         )
-        result.value = JSON.stringify(data, null, 2)
+        result.value = Object.entries(data as Record<string, unknown>).map(([key, value]) => ({
+          key,
+          value: value === null || value === undefined ? '-' : String(value),
+        }))
       },
       { successMessage: '竞赛库已导入' },
     )
@@ -158,7 +164,10 @@ const handleContestImport = async () => {
           contestImportFile.value as File,
           buildFieldMap(contestFieldMap.value),
         )
-        result.value = JSON.stringify(data, null, 2)
+        result.value = Object.entries(data as Record<string, unknown>).map(([key, value]) => ({
+          key,
+          value: value === null || value === undefined ? '-' : String(value),
+        }))
       },
       { successMessage: '竞赛获奖记录已导入' },
     )
@@ -508,6 +517,10 @@ onMounted(() => {
     :closable="false"
   />
   <el-card v-if="result" class="card" style="margin-top: 24px">
-    <pre>{{ result }}</pre>
+    <h3>导入结果</h3>
+    <el-table :data="result" border>
+      <el-table-column prop="key" label="字段" width="200" />
+      <el-table-column prop="value" label="结果" />
+    </el-table>
   </el-card>
 </template>

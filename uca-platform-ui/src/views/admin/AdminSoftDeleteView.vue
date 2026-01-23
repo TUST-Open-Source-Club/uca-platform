@@ -5,6 +5,7 @@ import { deleteContestRecord, deleteStudent } from '../../api/admin'
 import { queryContest } from '../../api/records'
 import { queryStudents } from '../../api/students'
 import { useRequest } from '../../composables/useRequest'
+import { formatStatus } from '../../utils/status'
 
 const router = useRouter()
 const students = ref<any[]>([])
@@ -75,7 +76,9 @@ const handleOpenPurge = async () => {
       <h4 style="margin-top: 16px">竞赛记录</h4>
       <el-table :data="contestRecords">
         <el-table-column prop="contest_name" label="竞赛名称" />
-        <el-table-column prop="status" label="状态" />
+        <el-table-column label="状态">
+          <template #default="scope">{{ formatStatus(scope.row.status) }}</template>
+        </el-table-column>
         <el-table-column label="操作">
           <template #default="scope">
             <el-button

@@ -86,19 +86,26 @@ const loadRecords = async () => {
 
 const resolveAttachmentUrl = (path: string) => apiUrl(path)
 
+const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+const matchesPrefix = (value: unknown, pattern: string) => {
+  const needle = pattern.trim().toLowerCase()
+  if (!needle) return true
+  return normalizeValue(value).startsWith(needle)
+}
+
 const filteredRecords = computed(() => {
   const filters = { ...filterForm }
   return records.value.filter((record) => {
-    if (filters.student_no && !String(record.student_no ?? '').includes(filters.student_no)) return false
-    if (filters.student_name && !String(record.student_name ?? '').includes(filters.student_name)) return false
-    if (filters.department && !String(record.department ?? '').includes(filters.department)) return false
-    if (filters.major && !String(record.major ?? '').includes(filters.major)) return false
-    if (filters.class_name && !String(record.class_name ?? '').includes(filters.class_name)) return false
-    if (filters.contest_name && !record.contest_name.includes(filters.contest_name)) return false
-    if (filters.contest_year && String(record.contest_year ?? '') !== filters.contest_year) return false
-    if (filters.contest_category && (record.contest_category ?? '') !== filters.contest_category) return false
-    if (filters.contest_level && !String(record.contest_level ?? '').includes(filters.contest_level)) return false
-    if (filters.award_level && !record.award_level.includes(filters.award_level)) return false
+    if (!matchesPrefix(record.student_no, filters.student_no)) return false
+    if (!matchesPrefix(record.student_name, filters.student_name)) return false
+    if (!matchesPrefix(record.department, filters.department)) return false
+    if (!matchesPrefix(record.major, filters.major)) return false
+    if (!matchesPrefix(record.class_name, filters.class_name)) return false
+    if (!matchesPrefix(record.contest_name, filters.contest_name)) return false
+    if (!matchesPrefix(record.contest_year, filters.contest_year)) return false
+    if (!matchesPrefix(record.contest_category, filters.contest_category)) return false
+    if (!matchesPrefix(record.contest_level, filters.contest_level)) return false
+    if (!matchesPrefix(record.award_level, filters.award_level)) return false
     return true
   })
 })

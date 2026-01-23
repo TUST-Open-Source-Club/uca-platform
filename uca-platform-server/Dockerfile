@@ -8,6 +8,7 @@ RUN apk add --no-cache \
     openssl-dev \
     openssl-libs-static \
     pkgconfig \
+    openjdk17-jre \
     fontconfig
 
 WORKDIR /app
@@ -23,6 +24,7 @@ RUN apk add --no-cache \
     libreoffice \
     ttf-dejavu \
     openssl \
+    openjdk17-jre \
     fontconfig
 
 WORKDIR /app
@@ -31,5 +33,6 @@ COPY --from=build /data /data
 COPY --from=build /app/fonts /usr/share/fonts/Windows
 
 ENV LIBREOFFICE_PATH=/usr/bin/soffice
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 EXPOSE 8443
 ENTRYPOINT ["/app/ucaplatform"]

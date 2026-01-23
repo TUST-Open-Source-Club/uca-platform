@@ -5,6 +5,7 @@ import type { UploadFile } from 'element-plus'
 import { uploadContestAttachment } from '../api/attachments'
 import { queryContest } from '../api/records'
 import { useRequest } from '../composables/useRequest'
+import { formatStatus } from '../utils/status'
 
 const status = ref('')
 const contest = ref<any[]>([])
@@ -71,7 +72,11 @@ const handleAttachmentChange = async (recordId: string, file: UploadFile) => {
         <el-table-column prop="contest_name" label="竞赛名称" />
         <el-table-column prop="contest_level" label="获奖级别" />
         <el-table-column prop="award_level" label="获奖等级" />
-        <el-table-column prop="status" label="状态" />
+        <el-table-column label="状态">
+          <template #default="{ row }">
+            {{ formatStatus(row.status) }}
+          </template>
+        </el-table-column>
         <el-table-column label="附件上传" width="180">
           <template #default="{ row }">
             <el-upload

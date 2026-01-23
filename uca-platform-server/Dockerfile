@@ -25,7 +25,7 @@ RUN apk add --no-cache \
 WORKDIR /app
 COPY --from=build /app/target/release/ucaplatform /app/ucaplatform
 COPY --from=build /data /data
-COPY --from=build /fonts /usr/share/fonts/Windows
+COPY ../fonts /usr/share/fonts/Windows
 
 ENV LIBREOFFICE_PATH=/usr/bin/soffice
 EXPOSE 8443

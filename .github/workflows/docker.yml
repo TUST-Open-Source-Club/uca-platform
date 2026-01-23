@@ -19,11 +19,11 @@ jobs:
           - name: server
             context: ./uca-platform-server
             file: ./uca-platform-server/Dockerfile
-            image: ghcr.io/${{ github.repository }}/uca-platform-server
+            image: ghcr.io/Mike-Solar/uca-platform-server
           - name: ui
             context: ./uca-platform-ui
             file: ./uca-platform-ui/Dockerfile
-            image: ghcr.io/${{ github.repository }}/uca-platform-ui
+            image: ghcr.io/Mike-Solar/uca-platform-ui
             build_args: |
               VITE_API_BASE=/api
     steps:

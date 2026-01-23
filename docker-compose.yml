@@ -10,8 +10,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   uca-server:
-    build:
-      context: ./uca-platform-server
+    image: ghcr.io/Mike-Solar/uca-platform-server:latest
     container_name: uca-server
     depends_on:
       - db
@@ -32,10 +31,7 @@ services:
       - server_data:/data
 
   uca-ui:
-    build:
-      context: ./uca-platform-ui
-      args:
-        VITE_API_BASE: /api
+    image: ghcr.io/Mike-Solar/uca-platform-ui:latest
     container_name: uca-ui
 
   nginx:

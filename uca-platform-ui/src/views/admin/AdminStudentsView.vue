@@ -27,6 +27,12 @@ const filterForm = reactive({
   class_name: '',
   keyword: '',
 })
+const emptyFilterForm = {
+  department: '',
+  major: '',
+  class_name: '',
+  keyword: '',
+}
 
 const pagination = reactive({
   page: 1,
@@ -106,6 +112,11 @@ const loadStudents = async () => {
     })
     students.value = data as StudentItem[]
   })
+}
+
+const clearFilters = () => {
+  Object.assign(filterForm, emptyFilterForm)
+  pagination.page = 1
 }
 
 const openEditDialog = (row: StudentItem) => {
@@ -310,6 +321,7 @@ onMounted(() => {
 
     <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end">
       <el-button :loading="listRequest.loading" @click="loadStudents">刷新列表</el-button>
+      <el-button @click="clearFilters">清空筛选</el-button>
       <el-button @click="handleToggleAll">全选</el-button>
       <el-button type="danger" :disabled="!selection.length" :loading="loginRequest.loading" @click="handleBulkDisableLogin">
         批量禁止登录

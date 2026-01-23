@@ -14,6 +14,11 @@ const filterForm = reactive({
   year: '',
   category: '',
 })
+const emptyFilterForm = {
+  name: '',
+  year: '',
+  category: '',
+}
 
 const pagination = reactive({
   page: 1,
@@ -75,6 +80,11 @@ const loadCompetitions = async () => {
   await listRequest.run(async () => {
     competitions.value = await listCompetitions()
   })
+}
+
+const clearFilters = () => {
+  Object.assign(filterForm, emptyFilterForm)
+  pagination.page = 1
 }
 
 const handleCreate = async () => {
@@ -174,6 +184,7 @@ onMounted(() => {
       </el-form>
       <div style="margin-left: auto; display: flex; gap: 8px">
         <el-button :loading="listRequest.loading" @click="loadCompetitions">刷新列表</el-button>
+        <el-button @click="clearFilters">清空筛选</el-button>
         <el-button @click="handleToggleAll">全选</el-button>
         <el-button type="danger" :disabled="!selection.length" :loading="deleteRequest.loading" @click="handleBulkDelete">
           批量删除

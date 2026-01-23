@@ -20,6 +20,6 @@ describe('App', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain('Labor Hours Platform')
+    expect(wrapper.text()).toContain('劳动教育课时认定审核平台')
   })
 })

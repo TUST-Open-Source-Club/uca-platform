@@ -36,7 +36,7 @@ describe('LoginView', () => {
           'el-form': { template: '<form><slot /></form>' },
           'el-form-item': { template: '<div><slot /></div>' },
           'el-select': { template: '<select><slot /></select>' },
-          'el-option': { template: '<option><slot /></option>' },
+          'el-option': { props: ['label'], template: '<option>{{ label }}</option>' },
           'el-alert': { template: '<div />' },
           'el-table': ElTableStub,
           'el-table-column': { template: '<col />' },

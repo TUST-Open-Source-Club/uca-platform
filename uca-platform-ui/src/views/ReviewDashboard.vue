@@ -25,6 +25,17 @@ const filterForm = reactive({
   match_status: '',
   student_id: '',
 })
+const emptyFilterForm = {
+  contest_name: '',
+  contest_year: '',
+  contest_category: '',
+  contest_level: '',
+  contest_role: '',
+  award_level: '',
+  status: '',
+  match_status: '',
+  student_id: '',
+}
 
 const pagination = reactive({
   page: 1,
@@ -113,6 +124,11 @@ const loadRecords = async () => {
   await listRequest.run(async () => {
     records.value = await queryContest()
   })
+}
+
+const clearFilters = () => {
+  Object.assign(filterForm, emptyFilterForm)
+  pagination.page = 1
 }
 
 const openReview = (record: ContestRecord) => {
@@ -303,6 +319,7 @@ onMounted(async () => {
 
     <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end">
       <el-button :loading="listRequest.loading" @click="loadRecords">刷新列表</el-button>
+      <el-button @click="clearFilters">清空筛选</el-button>
       <el-button @click="handleToggleAll">全选</el-button>
       <el-button type="primary" :disabled="!selection.length" @click="bulkDialogVisible = true">
         批量审核

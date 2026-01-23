@@ -27,6 +27,18 @@ const filterForm = reactive({
   contest_level: '',
   award_level: '',
 })
+const emptyFilterForm = {
+  student_no: '',
+  student_name: '',
+  department: '',
+  major: '',
+  class_name: '',
+  contest_name: '',
+  contest_year: '',
+  contest_category: '',
+  contest_level: '',
+  award_level: '',
+}
 
 const pagination = reactive({
   page: 1,
@@ -95,6 +107,11 @@ const pagedRecords = computed(() => {
   const start = (pagination.page - 1) * pagination.pageSize
   return filteredRecords.value.slice(start, start + pagination.pageSize)
 })
+
+const clearFilters = () => {
+  Object.assign(filterForm, emptyFilterForm)
+  pagination.page = 1
+}
 
 watch(
   () => [
@@ -200,6 +217,9 @@ onMounted(async () => {
         <el-input v-model="filterForm.award_level" placeholder="一等奖" />
       </el-form-item>
     </el-form>
+    <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end">
+      <el-button @click="clearFilters">清空筛选</el-button>
+    </div>
 
     <el-table v-if="filteredRecords.length" :data="pagedRecords" style="margin-top: 16px">
       <el-table-column type="expand">

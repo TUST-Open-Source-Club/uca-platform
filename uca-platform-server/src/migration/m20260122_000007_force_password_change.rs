@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Users::Table)
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Users::MustChangePassword)
                             .boolean()
                             .not_null()

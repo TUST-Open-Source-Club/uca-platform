@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import StudentDashboard from '../views/StudentDashboard.vue'
 import RecordsView from '../views/RecordsView.vue'
@@ -94,6 +94,19 @@ vi.mock('../api/attachments', () => ({
   uploadSignature: vi.fn().mockResolvedValue({}),
 }))
 
+vi.mock('../api/students', () => ({
+  getCurrentStudent: vi.fn().mockResolvedValue({
+    student_no: '2023001',
+    name: '张三',
+    gender: '男',
+    department: '信息学院',
+    major: '软件工程',
+    class_name: '软工1班',
+    phone: '13800000000',
+    allow_password_login: true,
+  }),
+}))
+
 vi.mock('../api/auth', () => ({
   totpVerify: vi.fn().mockResolvedValue({}),
   listDevices: vi.fn().mockResolvedValue([]),
@@ -124,11 +137,15 @@ const stubs = {
   'el-descriptions-item': { template: '<div><slot /></div>' },
   'el-pagination': { template: '<div />' },
   'el-date-picker': { template: '<input />' },
+  'el-image': { template: '<img />' },
+  'el-link': { template: '<a><slot /></a>' },
 }
 
 describe('Views', () => {
   it('renders student dashboard with dynamic options', async () => {
-    const wrapper = mount(StudentDashboard, { global: { stubs } })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(StudentDashboard, { global: { stubs, plugins: [pinia] } })
     await flushPromises()
     expect(wrapper.text()).toContain('学生中心')
     expect(wrapper.text()).toContain('全国大学生数学建模竞赛')

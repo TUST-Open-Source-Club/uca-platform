@@ -43,7 +43,6 @@ const accountForm = reactive({
 })
 
 const accountRules = {
-  email: [{ required: () => authStore.resetDelivery === 'email', message: '请输入邮箱', trigger: 'blur' }],
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
   new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }],
 }
@@ -226,8 +225,7 @@ const handleAttachmentChange = (file: UploadFile) => {
 
 const handleBindEmail = async () => {
   if (!accountFormRef.value) return
-  await accountFormRef.value.validateField('email', async (valid: boolean) => {
-    if (!valid) return
+  await accountFormRef.value.validateField('email', async () => {
     if (!accountForm.email.trim()) {
       accountRequest.error = '请输入邮箱'
       return

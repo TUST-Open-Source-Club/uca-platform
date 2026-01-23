@@ -6,7 +6,7 @@
 
 ### 1. 准备镜像
 
-项目已提供 GHCR 镜像：
+项目已提供 GHCR 镜像（基于 Alpine）：
 - `ghcr.io/tust-open-source-club/uca-platform/uca-platform-server:latest`
 - `ghcr.io/tust-open-source-club/uca-platform/uca-platform-ui:latest`
 

@@ -13,6 +13,7 @@ services:
     image: ghcr.io/tust-open-source-club/uca-platform/uca-platform-server:latest
     container_name: uca-server
     depends_on:
+      - uca-init
       - db
     environment:
       BIND_ADDR: 0.0.0.0:8443
@@ -29,6 +30,14 @@ services:
       LIBREOFFICE_PATH: /usr/bin/soffice
     volumes:
       - server_data:/data
+
+  uca-init:
+    image: alpine:3.20
+    container_name: uca-init
+    command: ["sh", "-c", "mkdir -p /data/uploads /data/tls && chown -R 65532:65532 /data"]
+    volumes:
+      - server_data:/data
+    restart: "no"
 
   uca-ui:
     image: ghcr.io/tust-open-source-club/uca-platform/uca-platform-ui:latest

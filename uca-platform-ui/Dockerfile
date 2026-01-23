@@ -10,7 +10,7 @@ ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=${VITE_API_BASE}
 RUN pnpm build
 
-FROM gcr.io/distroless/nginx-debian12
+FROM cgr.dev/chainguard/nginx:latest
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 EXPOSE 8080

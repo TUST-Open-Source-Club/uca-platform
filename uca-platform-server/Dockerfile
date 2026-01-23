@@ -1,4 +1,4 @@
-FROM rust:1.78-bookworm AS build
+FROM rust:1.93.0-trixie AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libreoffice \

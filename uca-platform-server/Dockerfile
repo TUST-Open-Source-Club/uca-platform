@@ -19,11 +19,13 @@ RUN apk add --no-cache \
     ca-certificates \
     libreoffice \
     ttf-dejavu \
+    openssl \
     fontconfig
 
 WORKDIR /app
 COPY --from=build /app/target/release/ucaplatform /app/ucaplatform
 COPY --from=build /data /data
+COPY --from=build /fonts /usr/share/fonts/Windows
 
 ENV LIBREOFFICE_PATH=/usr/bin/soffice
 EXPOSE 8443

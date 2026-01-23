@@ -28,6 +28,7 @@ services:
       TLS_CERT_PATH: /data/tls/cert.pem
       TLS_KEY_PATH: /data/tls/key.enc
       LIBREOFFICE_PATH: /usr/bin/soffice
+      RESET_DELIVERY: code
     volumes:
       - server_data:/data
 

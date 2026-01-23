@@ -257,8 +257,20 @@ pub async fn create_competition(
         .validate()
         .map_err(|_| AppError::validation("invalid competition payload"))?;
 
-    let exists = CompetitionLibrary::find()
-        .filter(competition_library::Column::Name.eq(&payload.name))
+    let mut exists_query = CompetitionLibrary::find()
+        .filter(competition_library::Column::Name.eq(&payload.name));
+    if let Some(year) = payload.year {
+        exists_query = exists_query.filter(competition_library::Column::Year.eq(year));
+    } else {
+        exists_query = exists_query.filter(competition_library::Column::Year.is_null());
+    }
+    if let Some(category) = payload.category.as_ref() {
+        exists_query =
+            exists_query.filter(competition_library::Column::Category.eq(category.to_uppercase()));
+    } else {
+        exists_query = exists_query.filter(competition_library::Column::Category.is_null());
+    }
+    let exists = exists_query
         .one(&state.db)
         .await
         .map_err(|err| AppError::Database(err.to_string()))?;
@@ -934,8 +946,21 @@ pub async fn import_competitions(
             } else {
                 Some(normalize_category(&category, plan.category_suffix.as_deref()))
             };
-            let exists = CompetitionLibrary::find()
-                .filter(competition_library::Column::Name.eq(&name))
+            let mut exists_query = CompetitionLibrary::find()
+                .filter(competition_library::Column::Name.eq(&name));
+            if let Some(year_value) = year {
+                exists_query = exists_query.filter(competition_library::Column::Year.eq(year_value));
+            } else {
+                exists_query = exists_query.filter(competition_library::Column::Year.is_null());
+            }
+            if let Some(category_value) = category.as_ref() {
+                exists_query = exists_query.filter(
+                    competition_library::Column::Category.eq(category_value.to_uppercase()),
+                );
+            } else {
+                exists_query = exists_query.filter(competition_library::Column::Category.is_null());
+            }
+            let exists = exists_query
                 .one(&state.db)
                 .await
                 .map_err(|err| AppError::Database(err.to_string()))?;

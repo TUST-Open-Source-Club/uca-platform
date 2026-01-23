@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { loginOptions, passkeyFinish, passkeyStart, passwordLogin, totpVerify } from '../api/auth'
-import { listCompetitionsPublic } from '../api/catalog'
+import { listCompetitionsPublic, type CompetitionItem } from '../api/catalog'
 import { useRequest } from '../composables/useRequest'
 import { useAuthStore } from '../stores/auth'
 import { credentialToJson, normalizeRequestOptions } from '../utils/webauthn'
@@ -13,7 +13,10 @@ const router = useRouter()
 const { loading: requestLoading, error: requestError, run: runRequest } = useRequest()
 const { run: runOptions } = useRequest()
 const { loading: competitionsLoading, error: competitionsError, run: runCompetitions } = useRequest()
-const competitions = ref<{ id: string; name: string }[]>([])
+const competitions = ref<CompetitionItem[]>([])
+const competitionFilter = reactive({
+  year: '',
+})
 
 const form = reactive({
   username: '',
@@ -65,6 +68,14 @@ const loadCompetitions = async () => {
 
 onMounted(() => {
   void loadCompetitions()
+})
+
+const filteredCompetitions = computed(() => {
+  const year = competitionFilter.year.trim()
+  return competitions.value.filter((item) => {
+    if (year && String(item.year ?? '') !== year) return false
+    return true
+  })
 })
 
 const loadLoginOptions = async () => {
@@ -186,7 +197,14 @@ const handleLogin = async () => {
   <el-card class="card" style="margin-top: 16px">
     <h3>竞赛清单（仅查询）</h3>
     
-    <el-table v-if="competitions.length" :data="competitions">
+    <el-form label-position="top" style="display: flex; flex-wrap: wrap; gap: 12px">
+      <el-form-item label="年份">
+        <el-input v-model="competitionFilter.year" placeholder="2024" />
+      </el-form-item>
+    </el-form>
+    <el-table v-if="filteredCompetitions.length" :data="filteredCompetitions">
+      <el-table-column prop="year" label="年份" width="120" />
+      <el-table-column prop="category" label="类型" width="100" />
       <el-table-column prop="name" label="竞赛名称" />
     </el-table>
     <el-empty v-else :description="competitionsLoading ? '加载中' : '暂无竞赛数据'" />

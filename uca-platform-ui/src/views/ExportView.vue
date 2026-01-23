@@ -149,13 +149,13 @@ onMounted(async () => {
         <h4>劳动教育学时汇总表（Excel）</h4>
         <el-form label-position="top">
           <el-form-item label="院系">
-            <el-input v-model="laborSummaryForm.department" placeholder="信息学院" />
+            <el-input v-model="laborSummaryForm.department" placeholder="人工智能学院" />
           </el-form-item>
           <el-form-item label="专业">
             <el-input v-model="laborSummaryForm.major" placeholder="软件工程" />
           </el-form-item>
           <el-form-item label="班级">
-            <el-input v-model="laborSummaryForm.className" placeholder="软工1班" />
+            <el-input v-model="laborSummaryForm.className" placeholder="222014" />
           </el-form-item>
           <el-button type="primary" :loading="laborSummaryRequest.loading" @click="handleLaborSummaryExport">
             导出 Excel
@@ -167,7 +167,7 @@ onMounted(async () => {
         <h4>劳动教育学时认定表</h4>
         <el-form ref="laborFormRef" :model="laborForm" :rules="laborRules" label-position="top">
           <el-form-item label="学号" prop="studentNo">
-            <el-input v-model="laborForm.studentNo" placeholder="2023001" />
+            <el-input v-model="laborForm.studentNo" placeholder="22201400" />
           </el-form-item>
           <el-button type="primary" :loading="laborRequest.loading" @click="handleLaborExport">
             导出 PDF
@@ -190,13 +190,13 @@ onMounted(async () => {
         <el-input v-model="filterForm.student_name" placeholder="张三" />
       </el-form-item>
       <el-form-item label="学院">
-        <el-input v-model="filterForm.department" placeholder="信息学院" />
+        <el-input v-model="filterForm.department" placeholder="人工智能学院" />
       </el-form-item>
       <el-form-item label="专业">
         <el-input v-model="filterForm.major" placeholder="软件工程" />
       </el-form-item>
       <el-form-item label="班级">
-        <el-input v-model="filterForm.class_name" placeholder="软工1班" />
+        <el-input v-model="filterForm.class_name" placeholder="232011" />
       </el-form-item>
       <el-form-item label="竞赛名称">
         <el-input v-model="filterForm.contest_name" placeholder="数学建模" />

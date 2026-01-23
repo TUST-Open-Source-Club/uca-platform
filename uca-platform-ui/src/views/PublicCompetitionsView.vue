@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { listCompetitionsPublic, type CompetitionItem } from '../api/catalog'
 import { useRequest } from '../composables/useRequest'
 
 const competitions = ref<CompetitionItem[]>([])
 const request = useRequest()
+const filterForm = reactive({
+  year: '',
+})
 
 const loadCompetitions = async () => {
   await request.run(
@@ -18,6 +21,14 @@ const loadCompetitions = async () => {
 onMounted(() => {
   void loadCompetitions()
 })
+
+const filteredCompetitions = computed(() => {
+  const year = filterForm.year.trim()
+  return competitions.value.filter((item) => {
+    if (year && String(item.year ?? '') !== year) return false
+    return true
+  })
+})
 </script>
 
 <template>
@@ -27,7 +38,12 @@ onMounted(() => {
   </section>
 
   <el-card class="card">
-    <el-table v-if="competitions.length" :data="competitions">
+    <el-form label-position="top" style="display: flex; flex-wrap: wrap; gap: 12px">
+      <el-form-item label="年份">
+        <el-input v-model="filterForm.year" placeholder="2024" />
+      </el-form-item>
+    </el-form>
+    <el-table v-if="filteredCompetitions.length" :data="filteredCompetitions">
       <el-table-column prop="year" label="年份" width="120" />
       <el-table-column prop="category" label="类型" width="100" />
       <el-table-column prop="name" label="竞赛名称" />

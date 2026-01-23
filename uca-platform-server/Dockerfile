@@ -6,6 +6,7 @@ RUN apk add --no-cache \
     libreoffice \
     ttf-dejavu \
     openssl-dev \
+    openssl-libs-static \
     pkgconfig \
     fontconfig
 

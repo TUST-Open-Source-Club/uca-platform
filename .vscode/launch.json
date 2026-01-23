@@ -3,6 +3,7 @@
   "configurations": [
     {
       "name": "UCA Server (debug)",
+      
       "type": "lldb",
       "request": "launch",
       "cargo": {

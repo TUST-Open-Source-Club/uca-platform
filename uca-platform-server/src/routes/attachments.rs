@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     extract::{Multipart, Path, State},
     http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    response::Response,
     Json,
 };
 use axum_extra::extract::cookie::CookieJar;

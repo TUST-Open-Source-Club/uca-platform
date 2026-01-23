@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: uca-postgres
+    environment:
+      POSTGRES_DB: ucaplatform
+      POSTGRES_USER: uca
+      POSTGRES_PASSWORD: uca_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  uca-server:
+    build:
+      context: ./uca-platform-server
+    container_name: uca-server
+    depends_on:
+      - db
+    environment:
+      BIND_ADDR: 0.0.0.0:8443
+      ALLOW_HTTP: "true"
+      DATABASE_URL: postgres://uca:uca_password@db:5432/ucaplatform
+      RP_ID: localhost
+      RP_ORIGIN: http://localhost
+      BASE_URL: http://localhost
+      AUTH_SECRET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      TLS_KEY_ENC_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      UPLOAD_DIR: /data/uploads
+      TLS_CERT_PATH: /data/tls/cert.pem
+      TLS_KEY_PATH: /data/tls/key.enc
+      LIBREOFFICE_PATH: /usr/bin/soffice
+    volumes:
+      - server_data:/data
+
+  uca-ui:
+    build:
+      context: ./uca-platform-ui
+      args:
+        VITE_API_BASE: /api
+    container_name: uca-ui
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: uca-nginx
+    depends_on:
+      - uca-ui
+      - uca-server
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  postgres_data:
+  server_data:

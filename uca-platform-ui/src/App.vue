@@ -53,7 +53,7 @@ const navItems = computed(() => {
 <template>
   <el-container class="app-shell">
     <el-aside class="sidebar" width="260px">
-      <div class="brand">Labor Hours Platform</div>
+      <div class="brand">劳动教育课时认定审核平台</div>
       <el-menu router class="nav" background-color="transparent" text-color="#1f4d63">
         <el-menu-item v-for="item in navItems" :key="item.path" :index="item.path">
           {{ item.label }}

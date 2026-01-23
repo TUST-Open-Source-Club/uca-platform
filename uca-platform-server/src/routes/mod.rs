@@ -51,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .route("/forms/:form_type/fields", get(forms::list_form_fields_for_type))
         .route("/competitions", get(admin::list_competitions_public))
         .route("/students", post(students::create_student))
+        .route("/students/me", get(students::get_current_student))
         .route("/students/:student_no", put(students::update_student))
         .route("/students/query", post(students::list_students))
         .route("/students/import", post(students::import_students))

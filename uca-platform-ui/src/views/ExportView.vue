@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { apiUrl } from '../api/client'
 import { exportLaborHoursPdf, exportLaborHoursSummaryExcel } from '../api/exports'
 import { queryContest, type ContestRecord } from '../api/records'
@@ -13,6 +13,24 @@ const laborSummaryForm = reactive({
   department: '',
   major: '',
   className: '',
+})
+
+const filterForm = reactive({
+  student_no: '',
+  student_name: '',
+  department: '',
+  major: '',
+  class_name: '',
+  contest_name: '',
+  contest_year: '',
+  contest_category: '',
+  contest_level: '',
+  award_level: '',
+})
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 10,
 })
 
 const laborFormRef = ref()
@@ -55,6 +73,46 @@ const loadRecords = async () => {
 }
 
 const resolveAttachmentUrl = (path: string) => apiUrl(path)
+
+const filteredRecords = computed(() => {
+  const filters = { ...filterForm }
+  return records.value.filter((record) => {
+    if (filters.student_no && !String(record.student_no ?? '').includes(filters.student_no)) return false
+    if (filters.student_name && !String(record.student_name ?? '').includes(filters.student_name)) return false
+    if (filters.department && !String(record.department ?? '').includes(filters.department)) return false
+    if (filters.major && !String(record.major ?? '').includes(filters.major)) return false
+    if (filters.class_name && !String(record.class_name ?? '').includes(filters.class_name)) return false
+    if (filters.contest_name && !record.contest_name.includes(filters.contest_name)) return false
+    if (filters.contest_year && String(record.contest_year ?? '') !== filters.contest_year) return false
+    if (filters.contest_category && (record.contest_category ?? '') !== filters.contest_category) return false
+    if (filters.contest_level && !String(record.contest_level ?? '').includes(filters.contest_level)) return false
+    if (filters.award_level && !record.award_level.includes(filters.award_level)) return false
+    return true
+  })
+})
+
+const pagedRecords = computed(() => {
+  const start = (pagination.page - 1) * pagination.pageSize
+  return filteredRecords.value.slice(start, start + pagination.pageSize)
+})
+
+watch(
+  () => [
+    filterForm.student_no,
+    filterForm.student_name,
+    filterForm.department,
+    filterForm.major,
+    filterForm.class_name,
+    filterForm.contest_name,
+    filterForm.contest_year,
+    filterForm.contest_category,
+    filterForm.contest_level,
+    filterForm.award_level,
+  ],
+  () => {
+    pagination.page = 1
+  },
+)
 
 onMounted(async () => {
   await loadRecords()
@@ -106,7 +164,44 @@ onMounted(async () => {
     <h3>竞赛记录预览</h3>
     <p style="margin-bottom: 12px">导出前可在此核对学生信息与附件。</p>
     <el-button :loading="listRequest.loading" @click="loadRecords">刷新列表</el-button>
-    <el-table v-if="records.length" :data="records" style="margin-top: 16px">
+
+    <el-form label-position="top" style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px">
+      <el-form-item label="学号">
+        <el-input v-model="filterForm.student_no" placeholder="2023001" />
+      </el-form-item>
+      <el-form-item label="姓名">
+        <el-input v-model="filterForm.student_name" placeholder="张三" />
+      </el-form-item>
+      <el-form-item label="学院">
+        <el-input v-model="filterForm.department" placeholder="信息学院" />
+      </el-form-item>
+      <el-form-item label="专业">
+        <el-input v-model="filterForm.major" placeholder="软件工程" />
+      </el-form-item>
+      <el-form-item label="班级">
+        <el-input v-model="filterForm.class_name" placeholder="软工1班" />
+      </el-form-item>
+      <el-form-item label="竞赛名称">
+        <el-input v-model="filterForm.contest_name" placeholder="数学建模" />
+      </el-form-item>
+      <el-form-item label="年份">
+        <el-input v-model="filterForm.contest_year" placeholder="2024" />
+      </el-form-item>
+      <el-form-item label="竞赛类型">
+        <el-select v-model="filterForm.contest_category" clearable placeholder="A/B">
+          <el-option label="A 类" value="A" />
+          <el-option label="B 类" value="B" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="获奖级别">
+        <el-input v-model="filterForm.contest_level" placeholder="国家级" />
+      </el-form-item>
+      <el-form-item label="获奖等级">
+        <el-input v-model="filterForm.award_level" placeholder="一等奖" />
+      </el-form-item>
+    </el-form>
+
+    <el-table v-if="filteredRecords.length" :data="pagedRecords" style="margin-top: 16px">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="display: grid; gap: 12px">
@@ -148,6 +243,16 @@ onMounted(async () => {
       <el-table-column prop="self_hours" label="自评学时" width="120" />
       <el-table-column prop="recommended_hours" label="推荐学时" width="120" />
     </el-table>
+    <el-pagination
+      v-if="filteredRecords.length"
+      style="margin-top: 12px; justify-content: flex-end"
+      layout="total, sizes, prev, pager, next"
+      :total="filteredRecords.length"
+      :page-size="pagination.pageSize"
+      :current-page="pagination.page"
+      @update:page-size="(size: number) => { pagination.pageSize = size; pagination.page = 1 }"
+      @update:current-page="(page: number) => { pagination.page = page }"
+    />
     <el-empty v-else description="暂无竞赛记录" />
   </el-card>
 

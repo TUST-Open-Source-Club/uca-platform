@@ -416,9 +416,9 @@ fn model_to_contest_response(
         student_id: model.student_id,
         student_no: student.map(|item| item.student_no.clone()),
         student_name: student.map(|item| item.name.clone()),
-        department: student.and_then(|item| item.department.clone()),
-        major: student.and_then(|item| item.major.clone()),
-        class_name: student.and_then(|item| item.class_name.clone()),
+        department: student.and_then(|item| Some(item.department.clone())),
+        major: student.and_then(|item| Some(item.major.clone())),
+        class_name: student.and_then(|item| Some(item.class_name.clone())),
         contest_name: model.contest_name,
         contest_year: model.contest_year,
         contest_category: model.contest_category,
@@ -790,7 +790,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let contest_resp = model_to_contest_response(contest, "matched", 2, Vec::new());
+        let contest_resp = model_to_contest_response(contest, "matched", 2, Vec::new(), None, Vec::new());
         assert_eq!(contest_resp.match_status, "matched");
         assert_eq!(contest_resp.contest_name, "竞赛");
     }

@@ -210,6 +210,29 @@ pub async fn create_student(
     )))
 }
 
+/// 获取当前登录学生信息。
+pub async fn get_current_student(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<StudentResponse>, AppError> {
+    let user = require_session_user(&state, &jar).await?;
+    require_role(&user, "student")?;
+
+    let student = Student::find()
+        .filter(students::Column::StudentNo.eq(&user.username))
+        .filter(students::Column::IsDeleted.eq(false))
+        .one(&state.db)
+        .await
+        .map_err(|err| AppError::Database(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("student not found"))?;
+    let allow_password_login =
+        fetch_student_login_flag(&state.db, &student.student_no).await?;
+    Ok(Json(StudentResponse::from_model(
+        student,
+        allow_password_login,
+    )))
+}
+
 /// 更新学生信息（仅管理员）。
 pub async fn update_student(
     State(state): State<AppState>,

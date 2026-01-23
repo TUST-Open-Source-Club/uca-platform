@@ -6,6 +6,7 @@ import { uploadContestAttachment } from '../api/attachments'
 import { createContest } from '../api/records'
 import { bindEmail, changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth'
 import { listFormFieldsByType, type FormField } from '../api/forms'
+import { getCurrentStudent, type StudentProfile } from '../api/students'
 import { useRequest } from '../composables/useRequest'
 import { useAuthStore } from '../stores/auth'
 
@@ -14,10 +15,12 @@ const result = ref('')
 const contestRequest = useRequest()
 const fieldRequest = useRequest()
 const accountRequest = useRequest()
+const studentRequest = useRequest()
 const authStore = useAuthStore()
 
 const contestFields = ref<FormField[]>([])
 const competitions = ref<CompetitionItem[]>([])
+const studentProfile = ref<StudentProfile | null>(null)
 
 const contestForm = reactive<Record<string, string | number>>({
   contest_name: '',
@@ -100,6 +103,24 @@ const applyFieldDefaults = (form: Record<string, string | number>, fields: FormF
   })
 }
 
+const applyStudentDefaults = (form: Record<string, string | number>, profile: StudentProfile | null) => {
+  if (!profile) return
+  const mapping: Record<string, string> = {
+    student_no: profile.student_no,
+    name: profile.name,
+    gender: profile.gender,
+    department: profile.department,
+    major: profile.major,
+    class_name: profile.class_name,
+    phone: profile.phone,
+  }
+  Object.entries(mapping).forEach(([key, value]) => {
+    if (form[key] === undefined || String(form[key]).trim() === '') {
+      form[key] = value
+    }
+  })
+}
+
 const extractCustomFields = (fields: FormField[], form: Record<string, string | number>) => {
   const payload: Record<string, string> = {}
   fields.forEach((field) => {
@@ -124,6 +145,13 @@ const loadFields = async () => {
   })
 }
 
+const loadStudentProfile = async () => {
+  await studentRequest.run(async () => {
+    studentProfile.value = await getCurrentStudent()
+    applyStudentDefaults(contestForm, studentProfile.value)
+  })
+}
+
 const loadPasswordPolicy = async () => {
   try {
     passwordPolicy.value = await getPasswordPolicy()
@@ -135,6 +163,7 @@ const loadPasswordPolicy = async () => {
 onMounted(() => {
   void loadFields()
   void loadPasswordPolicy()
+  void loadStudentProfile()
 })
 
 watch(

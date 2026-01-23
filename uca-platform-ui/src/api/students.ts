@@ -19,6 +19,10 @@ export type StudentUpdatePayload = {
   phone: string
 }
 
+export type StudentProfile = StudentPayload & {
+  allow_password_login: boolean
+}
+
 export async function createStudent(payload: StudentPayload): Promise<unknown> {
   return requestJson('/students', {
     method: 'POST',
@@ -66,4 +70,8 @@ export async function updateStudent(
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+}
+
+export async function getCurrentStudent(): Promise<StudentProfile> {
+  return requestJson('/students/me', { method: 'GET' })
 }
